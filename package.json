@@ -1,0 +1,38 @@
+{
+  "name": "opencode-strata-reasoning",
+  "version": "0.2.0",
+  "description": "Automatic reasoning-effort and temperature routing for Strata/Qwen models in opencode.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "lib.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "keywords": [
+    "opencode",
+    "plugin",
+    "strata",
+    "qwen",
+    "reasoning",
+    "adaptive",
+    "thinking"
+  ],
+  "author": "vince",
+  "license": "MIT",
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.14.24"
+  },
+  "peerDependenciesMeta": {
+    "@opencode-ai/plugin": {
+      "optional": true
+    }
+  }
+}
