@@ -51,7 +51,20 @@ The full local harness has three layers:
   `reasoning_effort`; unknown local providers default to no reasoning field
   unless configured in `providerProfiles`.
 
-## Install
+## Installation guide
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/vincent-chang-rightfighter/opencode-qwen3.8-flash-next-harness.git
+cd opencode-qwen3.8-flash-next-harness
+```
+
+Use the absolute path of this checkout in the next step. On Windows it will
+look like `C:/path/to/opencode-qwen3.8-flash-next-harness/index.js`; on Linux or
+macOS use the matching absolute path.
+
+### 2. Add the plugin
 
 Add the plugin to the `plugin` array in `~/.config/opencode/opencode.jsonc`
 or `.opencode/opencode.json`:
@@ -80,8 +93,64 @@ or `.opencode/opencode.json`:
 
 opencode 1.19.x uses the singular `plugin` key. The plural `plugins` key is a
 V2 setting; 1.19.x warns that it cannot be represented and omits it. Use `plugin`
-unless you are running a V2 build. Restart opencode after editing the config;
-plugin and config changes are not hot-reloaded.
+unless you are running a V2 build. Set `debug` to `false` after troubleshooting.
+
+### 3. Configure the local provider
+
+If your provider is already configured, skip this step. A minimal Strata-style
+provider looks like this; replace the base URL, key, and model id with your
+deployment:
+
+```json
+{
+  "provider": {
+    "strata": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Local Strata",
+      "options": {
+        "baseURL": "http://127.0.0.1:8080/v1",
+        "apiKey": "replace-with-your-key"
+      },
+      "models": {
+        "qwen3.8-flash-next-iq3_s": {
+          "name": "Qwen3.8 Flash Next (IQ3_S)",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "limit": { "context": 131072, "output": 32768 }
+        }
+      }
+    }
+  },
+  "model": "strata/qwen3.8-flash-next-iq3_s",
+  "small_model": "strata/qwen3.8-flash-next-iq3_s"
+}
+```
+
+The provider may be `ollama`, `llamacpp`, `vllm`, another known local id, or any
+provider whose `baseURL` is local. The plugin chooses the reasoning field from
+the provider profile automatically.
+
+### 4. Restart opencode
+
+Quit and restart opencode. Plugin and config changes are not hot-reloaded.
+
+### 5. Verify
+
+```bash
+opencode models
+npm run smoke:opencode
+```
+
+`opencode models` should list the configured model. `smoke:opencode` starts a
+headless opencode server and a mock provider; it requires the plugin to be
+active. Use `SMOKE_PROVIDER=ollama`, `llamacpp`, or `vllm` to test another
+profile.
+
+### 6. Uninstall
+
+Remove the plugin tuple from `plugin`, or set `"enabled": false`, then restart
+opencode.
 
 ## Options
 

@@ -50,7 +50,20 @@ opencode 已設定好的模型上。
   `reasoning_effort`；未知的本地 provider 預設不送 reasoning 欄位，除非在
   `providerProfiles` 設定。
 
-## 安裝
+## 安裝指南
+
+### 1. 取得專案
+
+```bash
+git clone https://github.com/vincent-chang-rightfighter/opencode-qwen3.8-flash-next-harness.git
+cd opencode-qwen3.8-flash-next-harness
+```
+
+下一步要使用這個 checkout 的絕對路徑。Windows 會像
+`C:/path/to/opencode-qwen3.8-flash-next-harness/index.js`；Linux/macOS 使用對應的
+絕對路徑。
+
+### 2. 加入外掛
 
 把此外掛加入 `~/.config/opencode/opencode.jsonc` 或
 `.opencode/opencode.json` 的 `plugin` 陣列：
@@ -78,8 +91,61 @@ opencode 已設定好的模型上。
 ```
 
 opencode 1.19.x 使用單數 `plugin` key；複數 `plugins` 是 V2 設定，1.19.x 會警告
-無法表示並忽略。除非使用 V2 build，否則請用 `plugin`。修改設定後要重新啟動
-opencode；外掛與設定不會 hot reload。
+無法表示並忽略。除非使用 V2 build，否則請用 `plugin`。`debug` 只在排查問題時
+設為 `true`。
+
+### 3. 設定本地 provider
+
+如果 provider 已經設定好，可以跳過。以下是最小 Strata 範例；請替換 base URL、
+key 與 model id：
+
+```json
+{
+  "provider": {
+    "strata": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Local Strata",
+      "options": {
+        "baseURL": "http://127.0.0.1:8080/v1",
+        "apiKey": "replace-with-your-key"
+      },
+      "models": {
+        "qwen3.8-flash-next-iq3_s": {
+          "name": "Qwen3.8 Flash Next (IQ3_S)",
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "limit": { "context": 131072, "output": 32768 }
+        }
+      }
+    }
+  },
+  "model": "strata/qwen3.8-flash-next-iq3_s",
+  "small_model": "strata/qwen3.8-flash-next-iq3_s"
+}
+```
+
+provider 也可以是 `ollama`、`llamacpp`、`vllm`、其他已知本地 id，或任何
+`baseURL` 是本地的 provider；外掛會依 profile 自動選擇 reasoning 欄位。
+
+### 4. 重新啟動 opencode
+
+離開並重新啟動 opencode；外掛與設定不會 hot reload。
+
+### 5. 驗證
+
+```bash
+opencode models
+npm run smoke:opencode
+```
+
+`opencode models` 應列出設定的模型。`smoke:opencode` 會啟動 headless opencode
+server 與 mock provider，需要外掛已在 active config 中；設定
+`SMOKE_PROVIDER=ollama`、`llamacpp` 或 `vllm` 可驗證其他 profile。
+
+### 6. 移除
+
+從 `plugin` 陣列移除 tuple，或設 `"enabled": false`，然後重新啟動 opencode。
 
 ## 選項
 
