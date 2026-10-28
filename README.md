@@ -135,7 +135,39 @@ Effort values are `none`, `low`, `medium`, `high`, `xhigh`. For the
 `reasoning_effort` profile it sends `reasoning_effort: "none"`; the `none`
 profile sends no reasoning field at all.
 
-### Provider profiles
+### Provider selection
+
+A request is handled by the harness only when both filters pass:
+
+1. The model id contains `qwen3.8-flash-next`.
+2. The provider is local:
+   - its id is in `localProviders` (defaults include `strata`, `ollama`,
+     `llamacpp`, `vllm`, `lmstudio`, ...), or
+   - its configured `baseURL` is local, which is detected automatically for
+     localhost, private IPv4, Tailscale/CGNAT, `*.local`, and Docker host names.
+
+`excludeProviders` is then applied as an optional explicit deny list. If
+`providers` is non-empty, it is an exact allowlist and replaces the local-provider
+rule; otherwise the local rules above decide.
+
+Examples:
+
+| Provider | How it is treated |
+|---|---|
+| `strata` at `http://100.64.0.10:8080/v1` | selected: known id + Tailscale address |
+| `ollama` at `http://localhost:11434/v1` | selected: known id + localhost |
+| `vllm` at `http://192.168.1.20:8000/v1` | selected: known id + private address |
+| `my-server` at `http://192.168.1.20:9000/v1` | selected by baseURL; add `localProviders` if detection is unavailable |
+| `my-server` at `https://llm.example.com/v1` | not selected unless `my-server` is in `localProviders` |
+| `opencode` at `https://opencode.ai` | not selected: not local |
+| `openai` at `https://api.openai.com/v1` | not selected: not local |
+
+A provider profile only chooses the reasoning field. It does **not** make a
+provider local. If a provider is selected but its profile is `none`, the todo,
+verification, subagent, and compaction features still run; only reasoning
+routing is skipped.
+
+### Reasoning profiles
 
 The built-in profiles are:
 
@@ -151,6 +183,7 @@ The built-in profiles are:
 Add or override a server without editing code:
 
 ```json
+"localProviders": ["my-local-server", "my-strata-fork"],
 "providerProfiles": {
   "my-local-server": "reasoning_effort",
   "my-strata-fork": { "reasoning": "chat_template_kwargs", "temperature": true }
