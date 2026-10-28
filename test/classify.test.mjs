@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import strataReasoning from "../index.js";
 import { classifyTask, resolveOptions } from "../lib.js";
 
 const options = resolveOptions({});
@@ -84,4 +85,58 @@ test("multi-file code stays high, not xhigh", () => {
   const result = classifyTask("Update src/a.ts and src/b.ts", options);
   assert.equal(result.kind, "implement");
   assert.equal(result.effort, "high");
+});
+
+test("task tool is blocked for the targeted local model family", async () => {
+  const raw = {
+    modelIncludes: ["qwen3.8-flash-next"],
+    disableSubagents: true,
+  };
+  const hooks = await strataReasoning({}, raw);
+  const chat = (modelID) => ({
+    sessionID: "session-1",
+    agent: "build",
+    model: { id: modelID, providerID: "strata" },
+    provider: { info: { id: "strata" } },
+    message: { parts: [{ text: "hello" }] },
+  });
+  const output = () => ({ options: {}, temperature: 1 });
+
+  await hooks["chat.params"](chat("qwen3.8-flash-next-iq3_s"), output());
+  await assert.rejects(
+    () =>
+      hooks["tool.execute.before"](
+        { tool: "task", sessionID: "session-1", callID: "call-1" },
+        {},
+      ),
+    /Subagents are disabled/,
+  );
+
+  const system = { system: [] };
+  await hooks["experimental.chat.system.transform"](
+    {
+      sessionID: "session-1",
+      model: { id: "qwen3.8-flash-next-iq3_s", providerID: "strata" },
+    },
+    system,
+  );
+  assert.equal(system.system.length, 1);
+
+  const coder = await strataReasoning({}, raw);
+  await coder["chat.params"](chat("Qwen3.8-Flash-Next-Coder"), output());
+  await assert.rejects(
+    () =>
+      coder["tool.execute.before"](
+        { tool: "task", sessionID: "session-1", callID: "call-2" },
+        {},
+      ),
+    /Subagents are disabled/,
+  );
+
+  const other = await strataReasoning({}, raw);
+  await other["chat.params"](chat("DeepSeek-V4.1-Flash"), output());
+  await other["tool.execute.before"](
+    { tool: "task", sessionID: "session-1", callID: "call-3" },
+    {},
+  );
 });

@@ -1,5 +1,8 @@
 export const EFFORTS = ["none", "low", "medium", "high", "xhigh"];
 
+export const SUBAGENT_DISABLED_INSTRUCTION =
+  "Subagents are disabled for this model. Do not call the task tool; complete the work directly with the available tools.";
+
 export const DEFAULTS = {
   enabled: true,
   providers: ["strata"],
@@ -27,6 +30,7 @@ export const DEFAULTS = {
   planAgents: ["plan", "architect", "design"],
   searchAgents: ["explore", "search", "recon"],
   ignoreAgents: ["title", "summary", "compaction"],
+  disableSubagents: false,
   riskBumpSteps: 1,
   multiFileBump: 1,
   longPromptThreshold: 4000,
@@ -328,6 +332,7 @@ export function resolveOptions(raw) {
     ignoreAgents: asStringArray(input.ignoreAgents, DEFAULTS.ignoreAgents).map((agent) =>
       agent.toLowerCase(),
     ),
+    disableSubagents: asBoolean(input.disableSubagents, DEFAULTS.disableSubagents),
     riskBumpSteps: asNumber(input.riskBumpSteps, DEFAULTS.riskBumpSteps),
     multiFileBump: asNumber(input.multiFileBump, DEFAULTS.multiFileBump),
     longPromptThreshold: asNumber(input.longPromptThreshold, DEFAULTS.longPromptThreshold),

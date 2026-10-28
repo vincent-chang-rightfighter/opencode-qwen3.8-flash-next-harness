@@ -2,7 +2,8 @@
 
 Automatic per-request reasoning-effort and temperature routing for
 [Strata](https://github.com/Niko1221/Strata) models in
-[opencode](https://opencode.ai).
+[opencode](https://opencode.ai). This project is configured for the local
+Strata Qwen3.8 Flash Next family, including IQ3_S.
 
 The plugin classifies each model request with fast heuristics and sets
 `chat_template_kwargs` on the Strata OpenAI-compatible request:
@@ -12,6 +13,7 @@ The plugin classifies each model request with fast heuristics and sets
 - `ultrathink` / `think harder` -> xhigh
 - short greetings and trivial edits -> low
 - everything else -> medium
+- optionally disable the `task`/subagent tool for targeted models; local Qwen3.8 Flash Next subagents are weaker and slower than doing the work directly
 
 It does not change the Strata model or restart the server. It only adds
 per-request parameters, so it works with a model already configured in
@@ -22,7 +24,8 @@ opencode.
 - opencode with plugin support (`@opencode-ai/plugin` >= 1.14.24; this
   repository was developed against opencode 1.19.4).
 - A Strata server whose OpenAI-compatible endpoint accepts
-  `chat_template_kwargs` (tested with Strata engine 0.1.50 / Qwen3.8).
+  `chat_template_kwargs` (tested with Strata engine 0.1.50 and 0.1.52 /
+  Qwen3.8).
 - Provider id `strata` in `opencode.json`, unless you override `providers`.
 
 ## Install
@@ -41,6 +44,7 @@ or `.opencode/opencode.json`:
         "defaultEffort": "medium",
         "codeEffort": "high",
         "toolEffort": "low",
+        "disableSubagents": true,
         "debug": true
       }
     ]
@@ -87,6 +91,7 @@ plugin and config changes are not hot-reloaded.
 | `planAgents` | `["plan","architect","design"]` | Agent names treated as design. |
 | `searchAgents` | `["explore","search","recon"]` | Agent names treated as search/recon. |
 | `ignoreAgents` | `["title","summary","compaction"]` | Auxiliary agents that are never routed. |
+| `disableSubagents` | `false` | Block the `task` tool and add a no-subagent system instruction for all models targeted by `providers`/`modelIncludes`. |
 | `respectExplicitEffort` | `true` | Do not override an existing `reasoning_effort` or `enable_thinking` in model options. |
 | `overrideTemperature` | `true` | Set the temperature values above. |
 | `debug` | `false` | Log each decision to stderr and `client.app.log` under `strata-reasoning`. |
@@ -102,6 +107,30 @@ plugin and config changes are not hot-reloaded.
 Effort values are `none`, `low`, `medium`, `high`, `xhigh`. When effort is
 `none`, the plugin sends `enable_thinking: false` instead of
 `reasoning_effort`.
+
+## Disabling subagents
+
+This project targets local Strata Qwen3.8 Flash Next, including IQ3_S. Its
+`modelIncludes` is `qwen3.8-flash-next`, so every variant in that family is
+covered. For this deployment, subagents are weaker and much slower than doing
+the work directly, so the config sets `disableSubagents: true`.
+
+The plugin:
+
+- adds the instruction "Subagents are disabled for this model..." to the
+  system prompt for every targeted request;
+- marks the session as subagent-disabled in `chat.params`;
+- throws before a `task` tool call in that session, with an error that tells
+  the model to use direct tools.
+
+`disableSubagents` applies to every model selected by `providers` and
+`modelIncludes`. Keep `modelIncludes` narrow if other models must keep their
+subagents.
+
+This stops the model from spawning subagents. It does not stop a user from
+manually selecting an `explore` or `general` agent in opencode; that is an
+opencode UI action, not a model `task` call. The plugin also blocks nested
+`task` calls made inside such a manually started subagent session.
 
 ## Classification signals
 
@@ -138,14 +167,15 @@ inspired by those systems, not copied from them.
 
 ## How it works
 
-The plugin registers three hooks:
+The plugin registers five hooks:
 
 - `chat.message` records the latest user prompt per session and resets the
   tool-failure counter.
 - `experimental.chat.messages.transform` marks tool-result turns, including
   assistant messages whose `tool` part has a completed/error state, inspects
   the tool error, and counts repeated failures.
-- `chat.params` classifies the prompt and writes:
+- `chat.params` classifies the prompt, tracks which model the session uses, and
+  writes:
 
 ```json
 {
@@ -155,6 +185,11 @@ The plugin registers three hooks:
   }
 }
 ```
+
+- `experimental.chat.system.transform` appends the no-subagent instruction
+  when `disableSubagents` is on and the request is targeted.
+- `tool.execute.before` throws for a `task` tool call in a session marked as
+  subagent-disabled.
 
 `@ai-sdk/openai-compatible` spreads unknown provider options into the request
 body, so the Strata server receives the field. If your provider strips unknown
@@ -170,8 +205,10 @@ opencode logs to see whether the hook runs.
 - The Strata server must accept per-request `chat_template_kwargs`. A server
   config with `chat_template_kwargs.reasoning_effort` set still allows
   request-level overrides in the tested build.
+- `disableSubagents` blocks the built-in `task` tool, not a manually selected
+  agent, and assumes the tool is still named `task`.
 - The plugin does not choose models; it only adjusts a targeted model's
-  reasoning effort and temperature.
+  reasoning effort and temperature, and optionally blocks its `task` tool.
 
 ## Development
 

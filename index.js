@@ -7,6 +7,7 @@ import {
   partsText,
   remember,
   resolveOptions,
+  SUBAGENT_DISABLED_INSTRUCTION,
   toolPartsFailed,
 } from "./lib.js";
 
@@ -16,6 +17,9 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
 
   const client = pluginInput?.client;
   const sessions = new Map();
+
+  const requestModelID = (input) =>
+    String(input?.model?.id ?? input?.model?.modelID ?? input?.model?.name ?? "");
 
   const debug = (payload) => {
     if (!options.debug) return;
@@ -36,7 +40,9 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
       const text = partsText(output?.parts) || messageText(output?.message);
       debug({ stage: "chat.message", sessionID: input.sessionID, textLength: text.length });
       if (text) {
+        const previous = sessions.get(input.sessionID) ?? {};
         remember(sessions, input.sessionID, {
+          ...previous,
           text,
           toolTurn: false,
           toolFailed: false,
@@ -98,6 +104,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
       }
 
       remember(sessions, sessionID, {
+        ...previous,
         text: text || previous?.text || "",
         toolTurn,
         toolFailed,
@@ -127,16 +134,35 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
     },
 
     "chat.params": async (input, output) => {
-      if (!matchesTarget(input, options)) return;
+      const state = sessions.get(input.sessionID) ?? {};
+      if (!matchesTarget(input, options)) {
+        if (state.subagentsDisabled || state.modelID) {
+          remember(sessions, input.sessionID, {
+            ...state,
+            subagentsDisabled: false,
+            modelID: undefined,
+          });
+        }
+        return;
+      }
       if (options.ignoreAgents.includes(String(input.agent ?? "").toLowerCase())) return;
 
-      const state = sessions.get(input.sessionID) ?? {};
       const text = messageText(input.message) || state.text || "";
+      const modelID = requestModelID(input);
+      const subagentsDisabled = options.disableSubagents;
       const classification = classifyTask(text, options, {
         agent: input.agent,
         toolTurn: Boolean(state.toolTurn),
         toolFailed: Boolean(state.toolFailed),
         failures: state.failures ?? 0,
+      });
+
+      remember(sessions, input.sessionID, {
+        ...state,
+        text,
+        toolTurn: false,
+        modelID,
+        subagentsDisabled,
       });
 
       const existing = output.options?.chat_template_kwargs;
@@ -149,22 +175,42 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
       );
       if (options.overrideTemperature) output.temperature = classification.temperature;
 
-      remember(sessions, input.sessionID, {
-        ...state,
-        text,
-        toolTurn: false,
-      });
-
       debug({
         sessionID: input.sessionID,
         agent: input.agent,
         provider: input.provider?.info?.id ?? input.provider?.id ?? null,
-        model: input.model?.id ?? input.model?.modelID ?? input.model?.name ?? null,
+        model: modelID || null,
         kind: classification.kind,
         effort: classification.effort,
         temperature: classification.temperature,
         reason: classification.reason,
+        subagentsDisabled,
       });
+    },
+
+    "experimental.chat.system.transform": async (input, output) => {
+      if (!options.disableSubagents) return;
+      if (!matchesTarget({ model: input?.model }, options)) return;
+      if (!Array.isArray(output?.system)) return;
+      if (!output.system.includes(SUBAGENT_DISABLED_INSTRUCTION)) {
+        output.system.push(SUBAGENT_DISABLED_INSTRUCTION);
+      }
+    },
+
+    "tool.execute.before": async (input) => {
+      if (!options.disableSubagents || input.tool !== "task") return;
+      const state = sessions.get(input.sessionID);
+      if (!state?.subagentsDisabled) return;
+      debug({
+        stage: "tool.execute.before",
+        sessionID: input.sessionID,
+        tool: input.tool,
+        model: state.modelID ?? null,
+        blocked: true,
+      });
+      throw new Error(
+        `Subagents are disabled for ${state.modelID || "this model"}. Do not call the task tool; complete the work with the direct tools.`,
+      );
     },
 
     event: async ({ event }) => {

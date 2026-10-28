@@ -1,7 +1,7 @@
 {
   "name": "opencode-strata-reasoning",
-  "version": "0.2.0",
-  "description": "Automatic reasoning-effort and temperature routing for Strata/Qwen models in opencode.",
+  "version": "0.3.0",
+  "description": "Reasoning routing and subagent blocking for local Strata Qwen3.8 Flash Next in opencode.",
   "type": "module",
   "main": "index.js",
   "exports": {
