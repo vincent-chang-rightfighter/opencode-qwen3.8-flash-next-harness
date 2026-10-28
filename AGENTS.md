@@ -67,7 +67,7 @@ needed, and blocks model-spawned subagents for this deployment.
   `experimental.chat.system.transform`, `tool.execute.before`,
   `tool.execute.after`, and `experimental.session.compacting`.
 - `config` adds providers with local `baseURL`s; `chat.message` sets the
-  planning flag; `chat.params` marks the session; `tool.execute.before` throws
+  planning flag; `chat.params` marks the session and appends harness instructions; `tool.execute.before` throws
   for `task` in a marked session and for an unchecked edit when the gate is on;
   the system transform adds the no-subagent, planning, and verification
   instructions; `tool.execute.after` tracks todos, edited files, and checks;

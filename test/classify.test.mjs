@@ -113,17 +113,17 @@ test("chat.params writes the provider-specific reasoning field", async () => {
 
   const ollama = output();
   await hooks["chat.params"](chat("ollama", "ollama-session"), ollama);
-  assert.equal(ollama.options.reasoning_effort, "high");
+  assert.equal(ollama.options.reasoningEffort, "high");
   assert.equal(ollama.options.chat_template_kwargs, undefined);
 
   const strata = output();
   await hooks["chat.params"](chat("strata", "strata-session"), strata);
   assert.equal(strata.options.chat_template_kwargs.reasoning_effort, "high");
-  assert.equal(strata.options.reasoning_effort, undefined);
+  assert.equal(strata.options.reasoningEffort, undefined);
 
   const lmstudio = output();
   await hooks["chat.params"](chat("lmstudio", "lmstudio-session"), lmstudio);
-  assert.equal(lmstudio.options.reasoning_effort, undefined);
+  assert.equal(lmstudio.options.reasoningEffort, undefined);
   assert.equal(lmstudio.options.chat_template_kwargs, undefined);
   assert.equal(lmstudio.temperature, 0.6);
 });
@@ -252,7 +252,11 @@ test("system prompt asks for todowrite on planned tasks only", async () => {
   const message = (text) => ({
     sessionID: "plan-session",
     agent: "build",
-    message: { parts: [{ text }] },
+    model: { providerID: "strata", modelID: "qwen3.8-flash-next-iq3_s" },
+    message: {
+      model: { providerID: "strata", modelID: "qwen3.8-flash-next-iq3_s" },
+      parts: [{ text }],
+    },
     parts: [{ text }],
   });
 

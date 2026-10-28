@@ -37,6 +37,15 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
     if (id && !options.localProviders.includes(id)) options.localProviders.push(id);
   };
 
+  const appendSystemInstructions = (message, instructions) => {
+    if (!message || instructions.length === 0) return;
+    const existing = Array.isArray(message.system)
+      ? message.system
+      : typeof message.system === "string"
+        ? [message.system]
+        : [];
+    message.system = [...new Set([...existing, ...instructions])].join("\n\n");
+  };
   const debug = (payload) => {
     if (!options.debug) return;
     console.error("[qwen-harness]", JSON.stringify(payload));
@@ -70,10 +79,21 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
       if (text) {
         const previous = sessions.get(input.sessionID) ?? {};
         const planning = shouldPlanTask(classifyTask(text, options), options);
+        const sourceModel = output?.message?.model ?? input.model;
+        const model = sourceModel
+          ? {
+              id: sourceModel.modelID ?? sourceModel.id,
+              providerID: sourceModel.providerID,
+            }
+          : null;
+        const targeted = model
+          ? matchesTarget({ model }, options)
+          : Boolean(previous.targeted);
         remember(sessions, input.sessionID, {
           ...previous,
           text,
           planning,
+          targeted,
           toolTurn: false,
           toolFailed: false,
           failures: 0,
@@ -212,11 +232,23 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         targeted: true,
       });
 
+      const instructions = [];
+      if (subagentsDisabled) instructions.push(SUBAGENT_DISABLED_INSTRUCTION);
+      if (options.autoTodo && planning) {
+        instructions.push(state.todosActive ? TODO_REMINDER : PLANNING_INSTRUCTION);
+      }
+      if (options.autoVerify) {
+        if (state.verificationFailed) instructions.push(VERIFICATION_FAILED_REMINDER);
+        else if (state.verificationPending) instructions.push(VERIFICATION_REMINDER);
+      }
+      appendSystemInstructions(input.message, instructions);
+
       const existing = output.options?.chat_template_kwargs;
       const explicitTopLevel =
         output.options &&
         typeof output.options === "object" &&
         (Object.prototype.hasOwnProperty.call(output.options, "reasoning_effort") ||
+          Object.prototype.hasOwnProperty.call(output.options, "reasoningEffort") ||
           Object.prototype.hasOwnProperty.call(output.options, "reasoning"));
       if (options.respectExplicitEffort && (hasExplicitEffort(existing) || explicitTopLevel)) {
         return;
@@ -229,7 +261,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
           classification.effort,
         );
       } else if (profile.reasoning === "reasoning_effort") {
-        output.options.reasoning_effort = classification.effort;
+        output.options.reasoningEffort = classification.effort;
       }
       if (profile.temperature && options.overrideTemperature) {
         output.temperature = classification.temperature;
@@ -252,7 +284,11 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
 
     "experimental.chat.system.transform": async (input, output) => {
       if (!Array.isArray(output?.system)) return;
-      if (!matchesTarget({ model: input?.model }, options)) return;
+      const state = sessions.get(input.sessionID);
+      const targeted =
+        state?.targeted === true ||
+        (state?.targeted !== false && matchesTarget({ model: input?.model }, options));
+      if (!targeted) return;
 
       if (
         options.disableSubagents &&
@@ -260,8 +296,6 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
       ) {
         output.system.push(SUBAGENT_DISABLED_INSTRUCTION);
       }
-
-      const state = sessions.get(input.sessionID);
 
       if (options.autoTodo) {
         const planning =

@@ -343,8 +343,9 @@ The plugin registers these hooks:
 - `experimental.chat.messages.transform` marks tool-result turns, including
   assistant messages whose `tool` part has a completed/error state, inspects
   the tool error, and counts repeated failures.
-- `chat.params` classifies the prompt, tracks which model the session uses, and
-  writes:
+- `chat.params` classifies the prompt, tracks which model the session uses,
+  appends the harness instructions to the current message's system field, and
+  writes the provider-specific reasoning options:
 
 ```json
 {
@@ -355,9 +356,9 @@ The plugin registers these hooks:
 }
 ```
 
-- `experimental.chat.system.transform` appends the no-subagent instruction when
-  `disableSubagents` is on, and the `todowrite` planning instruction when
-  `autoTodo` is on and the task needs planning.
+- `experimental.chat.system.transform` is a fallback for builds that invoke it;
+  it appends the no-subagent and `todowrite` instructions. The tested opencode
+  1.19.4 path is `chat.params` plus the message system field.
 - `tool.execute.before` throws for a `task` tool call in a session marked as
   subagent-disabled.
 - `tool.execute.after` watches `todowrite`, edits, and verification commands;

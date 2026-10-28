@@ -317,7 +317,8 @@ task-facts 方法（類別、風險、範圍）、
   工具失敗計數。
 - `experimental.chat.messages.transform` 標記工具結果回合，包括 `tool` part 為
   completed/error 的 assistant 訊息，檢查工具錯誤並計算重複失敗次數。
-- `chat.params` 分類提示、追蹤 session 使用的模型，並寫入：
+- `chat.params` 分類提示、追蹤 session 使用的模型，把 harness 指令附加到目前訊息
+  的 system 欄位，並寫入 provider 專屬的 reasoning 選項：
 
 ```json
 {
@@ -328,8 +329,9 @@ task-facts 方法（類別、風險、範圍）、
 }
 ```
 
-- `experimental.chat.system.transform` 在 `disableSubagents` 開啟時加入停用子代理
-  指令，並在 `autoTodo` 開啟且工作需要規劃時加入 `todowrite` 規劃指令。
+- `experimental.chat.system.transform` 是給會呼叫它的 build 用的 fallback；它會加入
+  停用子代理與 `todowrite` 指令。已測試的 opencode 1.19.4 路徑是 `chat.params`
+  加上訊息 system 欄位。
 - `tool.execute.before` 對標記為停用子代理的 session 中的 `task` 呼叫丟出錯誤。
 - `tool.execute.after` 監看 `todowrite`、修改與驗證指令；後續規劃提示會改用簡短的
   active-list 提醒，並追蹤修改過的檔案是否仍需要檢查。
@@ -369,7 +371,7 @@ task-facts 方法（類別、風險、範圍）、
 node --test test/*.test.mjs
 npm run smoke:opencode
 ```
-`smoke:opencode` 需要已安裝 opencode，且 active config 已載入此外掛；它會啟動 headless server 與 mock 本地 provider。
+`smoke:opencode` 需要已安裝 opencode，且 active config 已載入此外掛；它會啟動 headless server 與 mock 本地 provider。設定 `SMOKE_PROVIDER=ollama`、`llamacpp` 或 `vllm` 可驗證 top-level `reasoning_effort` profile。
 
 ## 授權
 

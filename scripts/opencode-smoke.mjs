@@ -212,15 +212,16 @@ try {
   }
 }
 
+const systemText = requests.map((body) => JSON.stringify(body?.messages ?? [])).join("\n");
 const expectedField = providerID === "strata" ? "chat_template_kwargs" : "reasoning_effort";
 const request = requests.find((body) =>
   expectedField === "chat_template_kwargs"
     ? body?.chat_template_kwargs?.reasoning_effort
     : body?.reasoning_effort,
 );
-if (!request) {
+if (!request || !systemText.includes("Subagents are disabled")) {
   console.error(`opencode smoke failed: no request carried ${expectedField}`);
-  console.error(JSON.stringify(requests[0], null, 2));
+  console.error(opencode?.logs?.().stderr ?? "");
   console.error(
     JSON.stringify(
       requests.map((body) => ({
