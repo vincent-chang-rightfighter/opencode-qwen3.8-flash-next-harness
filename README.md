@@ -1,5 +1,7 @@
 # opencode-qwen3.8-flash-next-harness
 
+**English** | [繁體中文](README.zh-TW.md)
+
 Automatic per-request reasoning-effort and temperature routing for local or
 self-hosted Qwen3.8 Flash Next models in [opencode](https://opencode.ai). It
 targets known local provider ids and providers whose configured base URL is a
