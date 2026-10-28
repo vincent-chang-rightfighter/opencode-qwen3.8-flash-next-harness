@@ -401,7 +401,9 @@ The plugin is plain ESM JavaScript; there is no build step.
 
 ```bash
 node --test test/*.test.mjs
+npm run smoke:opencode
 ```
+smoke:opencode requires opencode and this plugin to be installed in the active opencode config; it starts a headless server and a mock local provider.
 
 ## License
 

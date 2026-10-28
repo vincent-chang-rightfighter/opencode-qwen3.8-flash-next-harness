@@ -367,7 +367,9 @@ task-facts 方法（類別、風險、範圍）、
 
 ```bash
 node --test test/*.test.mjs
+npm run smoke:opencode
 ```
+`smoke:opencode` 需要已安裝 opencode，且 active config 已載入此外掛；它會啟動 headless server 與 mock 本地 provider。
 
 ## 授權
 
