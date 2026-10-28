@@ -228,6 +228,8 @@ test("verification commands and edited paths are recognized", () => {
   assert.equal(isVerificationCommand("cargo check"), true);
   assert.equal(isVerificationCommand("python -m pytest -q"), true);
   assert.equal(isVerificationCommand("git status"), false);
+  assert.equal(isVerificationCommand("pnpm verify", ["pnpm verify"]), true);
+  assert.equal(isVerificationCommand("pnpm verify"), false);
   assert.deepEqual(
     editedPathsFromTool("apply_patch", {
       patchText: "*** Update File: src/a.ts\n*** Add File: src/b.ts\n",
@@ -360,6 +362,85 @@ test("verification reminders and compaction context track edits", async () => {
   assert.match(context, /Harness state/);
   assert.match(context, /src\/a.ts/);
   assert.match(context, /Verification: failed/);
+});
+
+test("verification gate blocks another edit until a check runs", async () => {
+  const hooks = await strataReasoning(
+    {},
+    {
+      modelIncludes: ["qwen3.8-flash-next"],
+      autoVerify: true,
+      verificationGate: true,
+    },
+  );
+  const sessionID = "gate-session";
+  await hooks["chat.params"](
+    {
+      sessionID,
+      agent: "build",
+      model: { id: "qwen3.8-flash-next-iq3_s", providerID: "strata" },
+      provider: { info: { id: "strata" } },
+      message: { parts: [{ text: "implement src/a.ts" }] },
+    },
+    { options: {}, temperature: 1 },
+  );
+
+  await hooks["tool.execute.after"](
+    { tool: "edit", sessionID, callID: "edit-1", args: { filePath: "src/a.ts" } },
+    { title: "", output: "", metadata: {} },
+  );
+  await assert.rejects(
+    () =>
+      hooks["tool.execute.before"](
+        { tool: "edit", sessionID, callID: "edit-2" },
+        {},
+      ),
+    /Verification required/,
+  );
+
+  await hooks["tool.execute.after"](
+    {
+      tool: "bash",
+      sessionID,
+      callID: "test-1",
+      args: { command: "npm test" },
+    },
+    { title: "", output: "all tests passed", metadata: { exitCode: 0 } },
+  );
+  await hooks["tool.execute.before"](
+    { tool: "edit", sessionID, callID: "edit-3" },
+    {},
+  );
+
+  await hooks["tool.execute.after"](
+    { tool: "edit", sessionID, callID: "edit-4", args: { filePath: "src/a.ts" } },
+    { title: "", output: "", metadata: {} },
+  );
+  await hooks["tool.execute.after"](
+    {
+      tool: "bash",
+      sessionID,
+      callID: "test-2",
+      args: { command: "npm test" },
+    },
+    { title: "", output: "1 test failed", metadata: { exitCode: 1 } },
+  );
+  await hooks["tool.execute.before"](
+    { tool: "edit", sessionID, callID: "edit-5" },
+    {},
+  );
+  await hooks["tool.execute.after"](
+    { tool: "edit", sessionID, callID: "edit-6", args: { filePath: "src/a.ts" } },
+    { title: "", output: "", metadata: {} },
+  );
+  await assert.rejects(
+    () =>
+      hooks["tool.execute.before"](
+        { tool: "edit", sessionID, callID: "edit-7" },
+        {},
+      ),
+    /Verification required/,
+  );
 });
 
 test("task tool is blocked for the targeted local model family", async () => {

@@ -2,6 +2,8 @@
 
 [English](README.md) | **繁體中文**
 
+[![tests](https://github.com/vincent-chang-rightfighter/opencode-qwen3.8-flash-next-harness/actions/workflows/tests.yml/badge.svg)](https://github.com/vincent-chang-rightfighter/opencode-qwen3.8-flash-next-harness/actions/workflows/tests.yml)
+
 在 [opencode](https://opencode.ai) 中，為本地或自架 Qwen3.8 Flash Next 模型提供
 每次請求自動調整 reasoning effort 與 temperature 的能力。只要 model id 包含
 `qwen3.8-flash-next`，且 provider 是已知的本地 id，或其設定的 base URL 是本地
@@ -67,6 +69,7 @@ opencode 已設定好的模型上。
         "disableSubagents": true,
         "autoTodo": true,
         "autoVerify": true,
+        "verificationGate": true,
         "debug": true
       }
     ]
@@ -118,6 +121,8 @@ opencode；外掛與設定不會 hot reload。
 | `disableSubagents` | `false` | 對所有本地／目標模型封鎖 `task` 工具，並加入停用子代理的 system instruction。 |
 | `autoTodo` | `false` | 對多步驟／程式碼／設計／除錯／風險工作加入 `todowrite` 規劃指引與清單提醒。 |
 | `autoVerify` | `false` | 追蹤修改檔案與 test/lint 指令、提醒驗證，並在 compaction 後保留狀態。 |
+| `verificationGate` | `false` | 檢查通過前阻擋下一次 `edit`/`write`/`apply_patch`；檢查失敗後允許一次修正修改。 |
+| `verificationCommands` | `[]` | 額外視為驗證指令的子字串。 |
 | `respectExplicitEffort` | `true` | 不覆寫 model options 中已存在的 `reasoning_effort` 或 `enable_thinking`。 |
 | `overrideTemperature` | `true` | 套用上表中的 temperature。 |
 | `debug` | `false` | 將每次決策寫到 stderr 與 `client.app.log`，service 名稱為 `qwen-harness`。 |
@@ -236,12 +241,33 @@ follow-up 或 blocker。簡單問題、搜尋、機械式修改與工具結果�
 [Subagent Todo](https://www.opendock.net/plugins/opencode-subagent-todo/) 使用的
 active-list reminder 模式。
 
+### 唯讀 plan 指令
+
+可以在全域 opencode 設定加入 `/plan` 指令，路由到內建的唯讀 `plan` agent：
+
+```json
+"command": {
+  "plan": {
+    "description": "Create a detailed read-only plan for the current request",
+    "agent": "plan",
+    "template": "Create a detailed implementation plan for: $ARGUMENTS\n\nDo not edit files or run commands that change the workspace. Include the goal, ordered steps with a one-line reason for each, key risks or tradeoffs, files or areas to inspect, and the verification strategy. End with a concise todo-ready summary."
+  }
+}
+```
+
+遇到模糊或多檔案工作時先用 `/plan <需求>`，看完計畫再切回 build mode。這是
+opencode 的 plan agent 路徑；plugin 的 todo 規劃仍用於實際 build 回合。
+
 ## 驗證與 compaction
 
 啟用 `autoVerify: true` 後，外掛會監看 `edit`、`write`、`apply_patch`，加入簡短的
 「上次檢查後又改了檔案」提醒。之後若 `bash` 指令看起來像 test、lint、typecheck 或
 build，外掛會記錄成功或失敗。成功的檢查會清除提醒；失敗的檢查會保留更強烈的
 「修正後重跑」提醒，直到後續檢查通過。
+
+啟用 `verificationGate: true` 後，目前修改尚未檢查時，下一次 `edit`、`write` 或
+`apply_patch` 會被阻擋。檢查失敗後允許一次修正修改，之後必須再跑檢查。這是刻意
+偏嚴格的設定；沒有可辨識 test/lint/build 指令的專案應關閉 gate 或補上真正的檢查。
 
 `experimental.session.compacting` hook 會把 harness 狀態附加到 compaction context：
 目前請求、規劃／todo 狀態、修改過的檔案、驗證狀態，以及最後一次失敗檢查的尾端。
@@ -328,8 +354,8 @@ task-facts 方法（類別、風險、範圍）、
 - `disableSubagents` 封鎖內建 `task` 工具，不會封鎖手動選擇的 agent，並假設工具
   名稱仍是 `task`。
 - `autoTodo` 是 prompt 層級指引；模型仍可能跳過 todo 清單。
-- `autoVerify` 會偵測常見 test/lint/build 指令；自訂 script 可能不會被辨識，且提醒
-  不是強制封鎖。
+- `autoVerify` 會偵測常見 test/lint/build 指令；自訂 script 可能不會被辨識。
+  `verificationGate` 是硬性阻擋，請只在專案有可辨識檢查時開啟。
 - 外掛不選擇模型；它只調整目標模型的 reasoning effort 與 temperature、可選擇封鎖
   其 `task` 工具、要求它以 todo 規劃，並追蹤驗證狀態。
 

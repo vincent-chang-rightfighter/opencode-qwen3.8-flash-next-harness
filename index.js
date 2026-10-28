@@ -173,12 +173,13 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         input.provider?.baseURL;
       if (isLocalEndpoint(baseURL)) addLocalProvider(providerID);
       if (!matchesTarget(input, options)) {
-        if (state.subagentsDisabled || state.modelID || state.planning) {
+        if (state.subagentsDisabled || state.modelID || state.planning || state.targeted) {
           remember(sessions, input.sessionID, {
             ...state,
             subagentsDisabled: false,
             modelID: undefined,
             planning: false,
+            targeted: false,
           });
         }
         return;
@@ -207,6 +208,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         modelID,
         subagentsDisabled,
         planning,
+        targeted: true,
       });
 
       const existing = output.options?.chat_template_kwargs;
@@ -286,19 +288,39 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
     },
 
     "tool.execute.before": async (input) => {
-      if (!options.disableSubagents || input.tool !== "task") return;
       const state = sessions.get(input.sessionID);
-      if (!state?.subagentsDisabled) return;
-      debug({
-        stage: "tool.execute.before",
-        sessionID: input.sessionID,
-        tool: input.tool,
-        model: state.modelID ?? null,
-        blocked: true,
-      });
-      throw new Error(
-        `Subagents are disabled for ${state.modelID || "this model"}. Do not call the task tool; complete the work with the direct tools.`,
-      );
+
+      if (input.tool === "task" && options.disableSubagents && state?.subagentsDisabled) {
+        debug({
+          stage: "tool.execute.before",
+          sessionID: input.sessionID,
+          tool: input.tool,
+          model: state.modelID ?? null,
+          blocked: "subagents",
+        });
+        throw new Error(
+          `Subagents are disabled for ${state.modelID || "this model"}. Do not call the task tool; complete the work with the direct tools.`,
+        );
+      }
+
+      if (
+        options.verificationGate &&
+        state?.targeted &&
+        ["edit", "write", "apply_patch"].includes(input.tool) &&
+        state.verificationPending &&
+        state.verificationStale
+      ) {
+        debug({
+          stage: "tool.execute.before",
+          sessionID: input.sessionID,
+          tool: input.tool,
+          model: state.modelID ?? null,
+          blocked: "verification",
+        });
+        throw new Error(
+          "Verification required: files changed since the last check. Run the relevant test, lint, typecheck, or build command before another edit.",
+        );
+      }
     },
 
     "tool.execute.after": async (input, output) => {
@@ -330,6 +352,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
           ...state,
           editedFiles,
           verificationPending: true,
+          verificationStale: true,
         });
         debug({
           stage: "tool.execute.after",
@@ -343,7 +366,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
 
       if (input.tool !== "bash") return;
       const command = typeof input.args?.command === "string" ? input.args.command : "";
-      if (!isVerificationCommand(command)) return;
+      if (!isVerificationCommand(command, options.verificationCommands)) return;
       const text = typeof output?.output === "string" ? output.output : "";
       const exitCode = Number(
         output?.metadata?.exitCode ?? output?.metadata?.exit_code ?? 0,
@@ -354,6 +377,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         ...state,
         verificationPending: failed,
         verificationFailed: failed,
+        verificationStale: false,
         lastVerification: command.slice(0, 300),
         lastVerificationOutput: failed ? text.slice(-1200) : undefined,
       });

@@ -12,7 +12,7 @@ needed, and blocks model-spawned subagents for this deployment.
 - Model target: `qwen3.8-flash-next` (all variants)
 - Reasoning profile: `strata` = `chat_template_kwargs`; Ollama/llama.cpp/vLLM =
   `reasoning_effort`; unknown local providers = no reasoning field
-- Config: `disableSubagents: true`, `autoTodo: true`, and `autoVerify: true`
+- Config: `disableSubagents: true`, `autoTodo: true`, `autoVerify: true`, and `verificationGate: true`
 - Subagents are disabled because local Qwen3.8 Flash Next subagents are weaker
   and much slower than doing the work directly.
 - Verification state is tracked per session and preserved through compaction.
@@ -33,6 +33,8 @@ needed, and blocks model-spawned subagents for this deployment.
 - Keep `autoVerify: true`; track edited files and common test/lint/build
   commands, remind the model to verify, and keep failures active until a later
   check passes.
+- Keep `verificationGate: true`; block the next edit until a check runs, and
+  allow exactly one corrective edit after a failed check.
 - Preserve the harness-state block in compaction.
 - Do not require todo planning for simple lookups or mechanical edits; skip
   those.
@@ -65,9 +67,10 @@ needed, and blocks model-spawned subagents for this deployment.
   `tool.execute.after`, and `experimental.session.compacting`.
 - `config` adds providers with local `baseURL`s; `chat.message` sets the
   planning flag; `chat.params` marks the session; `tool.execute.before` throws
-  for `task` in a marked session; the system transform adds the no-subagent,
-  planning, and verification instructions; `tool.execute.after` tracks todos,
-  edited files, and checks; the compaction hook preserves the harness state.
+  for `task` in a marked session and for an unchecked edit when the gate is on;
+  the system transform adds the no-subagent, planning, and verification
+  instructions; `tool.execute.after` tracks todos, edited files, and checks;
+  the compaction hook preserves the harness state.
 
 ## Tests
 

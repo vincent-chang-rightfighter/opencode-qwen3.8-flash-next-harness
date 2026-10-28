@@ -2,6 +2,8 @@
 
 **English** | [繁體中文](README.zh-TW.md)
 
+[![tests](https://github.com/vincent-chang-rightfighter/opencode-qwen3.8-flash-next-harness/actions/workflows/tests.yml/badge.svg)](https://github.com/vincent-chang-rightfighter/opencode-qwen3.8-flash-next-harness/actions/workflows/tests.yml)
+
 Automatic per-request reasoning-effort and temperature routing for local or
 self-hosted Qwen3.8 Flash Next models in [opencode](https://opencode.ai). It
 targets known local provider ids and providers whose configured base URL is a
@@ -68,6 +70,7 @@ or `.opencode/opencode.json`:
         "disableSubagents": true,
         "autoTodo": true,
         "autoVerify": true,
+        "verificationGate": true,
         "debug": true
       }
     ]
@@ -120,6 +123,8 @@ plugin and config changes are not hot-reloaded.
 | `disableSubagents` | `false` | Block the `task` tool and add a no-subagent system instruction for all local/targeted models. |
 | `autoTodo` | `false` | Add `todowrite` planning guidance and an active-list reminder for multi-step/code/design/debug/risky work. |
 | `autoVerify` | `false` | Track edited files and test/lint commands, remind the model to verify, and preserve the state through compaction. |
+| `verificationGate` | `false` | Block another `edit`/`write`/`apply_patch` until a check runs; after a failed check, allow one corrective edit. |
+| `verificationCommands` | `[]` | Extra command substrings that count as verification. |
 | `respectExplicitEffort` | `true` | Do not override an existing `reasoning_effort` or `enable_thinking` in model options. |
 | `overrideTemperature` | `true` | Set the temperature values above. |
 | `debug` | `false` | Log each decision to stderr and `client.app.log` under `qwen-harness`. |
@@ -241,6 +246,25 @@ a shorter "keep the active list current" reminder instead of the full creation
 instruction. The reminder also asks for a brief explanation when scope or order
 changes. The `tool.execute.after` hook tracks that state per session.
 
+### Read-only plan command
+
+The global opencode config can expose a `/plan` command that routes to the
+built-in read-only `plan` agent:
+
+```json
+"command": {
+  "plan": {
+    "description": "Create a detailed read-only plan for the current request",
+    "agent": "plan",
+    "template": "Create a detailed implementation plan for: $ARGUMENTS\n\nDo not edit files or run commands that change the workspace. Include the goal, ordered steps with a one-line reason for each, key risks or tradeoffs, files or areas to inspect, and the verification strategy. End with a concise todo-ready summary."
+  }
+}
+```
+
+Use `/plan <request>` for ambiguous or multi-file work, review the plan, then
+switch back to build mode. This is the opencode plan-agent path; the plugin's
+todo planning remains useful for the build turn.
+
 The plugin cannot invoke `todowrite` itself; this is system-prompt guidance, so
 a model can still skip it. The wording and state rules follow opencode's own
 [`todowrite` guidance](https://github.com/sst/opencode/blob/dev/packages/opencode/src/tool/todowrite.txt),
@@ -257,6 +281,12 @@ then adds a short "you changed files since the last check" reminder. When a late
 success or failure. A successful check clears the reminder; a failed check keeps
 a stronger "fix and rerun" reminder active until a check passes.
 
+With `verificationGate: true`, the next `edit`, `write`, or `apply_patch` is
+blocked while the current change is unchecked. After a failed check, the model
+may make one corrective edit; the gate then requires another check. This is
+intentionally strict: projects without a recognized test/lint/build command
+should leave the gate off or add a real check.
+
 The `experimental.session.compacting` hook appends a harness-state block to the
 compaction context: current request, planning/todo state, edited files,
 verification status, and the tail of the last failed check. This keeps the
@@ -265,7 +295,8 @@ patterns used by Cline, the structured condenser used by OpenHands, and the
 plan/permission/compaction model documented by Claude Code.
 
 The command detector is heuristic. Custom or obscure verification commands may
-not be recognized, so the reminder is advisory, not a hard block.
+not be recognized, so the reminder itself is advisory; `verificationGate` is the
+hard block, and it only works when the project has a recognized check.
 
 ## Classification signals
 
@@ -357,7 +388,8 @@ because they run in opencode, not in the inference server.
   agent, and assumes the tool is still named `task`.
 - `autoTodo` is prompt-level guidance; the model can still skip the todo list.
 - `autoVerify` detects common test/lint/build commands; custom scripts may not
-  be recognized, and the reminder is not a hard block.
+  be recognized. `verificationGate` is hard, so use it only where a recognized
+  check exists.
 - The plugin does not choose models; it only adjusts a targeted model's
   reasoning effort and temperature, optionally blocks its `task` tool, asks it
   to plan with todos, and tracks verification state.

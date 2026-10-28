@@ -74,6 +74,8 @@ export const DEFAULTS = {
   disableSubagents: false,
   autoTodo: false,
   autoVerify: false,
+  verificationGate: false,
+  verificationCommands: [],
   riskBumpSteps: 1,
   multiFileBump: 1,
   longPromptThreshold: 4000,
@@ -449,6 +451,11 @@ export function resolveOptions(raw) {
     disableSubagents: asBoolean(input.disableSubagents, DEFAULTS.disableSubagents),
     autoTodo: asBoolean(input.autoTodo, DEFAULTS.autoTodo),
     autoVerify: asBoolean(input.autoVerify, DEFAULTS.autoVerify),
+    verificationGate: asBoolean(input.verificationGate, DEFAULTS.verificationGate),
+    verificationCommands: asStringArray(
+      input.verificationCommands,
+      DEFAULTS.verificationCommands,
+    ),
     riskBumpSteps: asNumber(input.riskBumpSteps, DEFAULTS.riskBumpSteps),
     multiFileBump: asNumber(input.multiFileBump, DEFAULTS.multiFileBump),
     longPromptThreshold: asNumber(input.longPromptThreshold, DEFAULTS.longPromptThreshold),
@@ -555,8 +562,12 @@ export function toolPartsFailed(parts) {
 const VERIFICATION_COMMAND_RE =
   /(?:^|[;&|]\s*)(?:npm\s+(?:test|run\s+(?:test|lint|build|check|typecheck))|pnpm\s+(?:test|lint|build|check|run\s+(?:test|lint|build|check))|yarn\s+(?:test|lint|build|check)|bun\s+(?:test|run\s+(?:test|lint|build|check))|cargo\s+(?:test|check|build|clippy)|go\s+(?:test|build|vet)|dotnet\s+(?:test|build)|mvn\s+(?:test|verify|package)|gradle\s+(?:test|check|build)|make|cmake\s+--build|npx\s+(?:tsc|eslint|vitest|jest|prettier))\b|\b(?:pytest|vitest|jest|eslint|ruff|mypy|tsc|prettier|black|rustfmt|gofmt)\b/i;
 
-export function isVerificationCommand(command) {
-  return typeof command === "string" && VERIFICATION_COMMAND_RE.test(command);
+export function isVerificationCommand(command, customCommands = []) {
+  if (typeof command !== "string") return false;
+  if (VERIFICATION_COMMAND_RE.test(command)) return true;
+  return customCommands.some((fragment) =>
+    command.toLowerCase().includes(String(fragment).toLowerCase()),
+  );
 }
 
 export function editedPathsFromTool(tool, args) {
