@@ -3,6 +3,7 @@ import {
   classifyTask,
   editedPathsFromTool,
   hasExplicitEffort,
+  isCodePath,
   isLocalEndpoint,
   isVerificationCommand,
   looksLikeToolFailure,
@@ -308,7 +309,8 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         state?.targeted &&
         ["edit", "write", "apply_patch"].includes(input.tool) &&
         state.verificationPending &&
-        state.verificationStale
+        state.verificationStale &&
+        state.gateRequired
       ) {
         debug({
           stage: "tool.execute.before",
@@ -318,7 +320,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
           blocked: "verification",
         });
         throw new Error(
-          "Verification required: files changed since the last check. Run the relevant test, lint, typecheck, or build command before another edit.",
+          "Verification required: code files changed since the last check. Run the relevant test, lint, typecheck, or build command before another edit.",
         );
       }
     },
@@ -348,11 +350,13 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         const editedFiles = [
           ...new Set([...(Array.isArray(state.editedFiles) ? state.editedFiles : []), ...paths]),
         ].slice(-20);
+        const codeChanged = paths.length === 0 || paths.some(isCodePath);
         remember(sessions, input.sessionID, {
           ...state,
           editedFiles,
           verificationPending: true,
           verificationStale: true,
+          gateRequired: Boolean(state.gateRequired) || codeChanged,
         });
         debug({
           stage: "tool.execute.after",
@@ -378,6 +382,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         verificationPending: failed,
         verificationFailed: failed,
         verificationStale: false,
+        gateRequired: failed ? Boolean(state.gateRequired) : false,
         lastVerification: command.slice(0, 300),
         lastVerificationOutput: failed ? text.slice(-1200) : undefined,
       });

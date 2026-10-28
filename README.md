@@ -123,7 +123,7 @@ plugin and config changes are not hot-reloaded.
 | `disableSubagents` | `false` | Block the `task` tool and add a no-subagent system instruction for all local/targeted models. |
 | `autoTodo` | `false` | Add `todowrite` planning guidance and an active-list reminder for multi-step/code/design/debug/risky work. |
 | `autoVerify` | `false` | Track edited files and test/lint commands, remind the model to verify, and preserve the state through compaction. |
-| `verificationGate` | `false` | Block another `edit`/`write`/`apply_patch` until a check runs; after a failed check, allow one corrective edit. |
+| `verificationGate` | `false` | Block another code-file `edit`/`write`/`apply_patch` until a check runs; docs-only edits are not gated. |
 | `verificationCommands` | `[]` | Extra command substrings that count as verification. |
 | `respectExplicitEffort` | `true` | Do not override an existing `reasoning_effort` or `enable_thinking` in model options. |
 | `overrideTemperature` | `true` | Set the temperature values above. |
@@ -281,11 +281,12 @@ then adds a short "you changed files since the last check" reminder. When a late
 success or failure. A successful check clears the reminder; a failed check keeps
 a stronger "fix and rerun" reminder active until a check passes.
 
-With `verificationGate: true`, the next `edit`, `write`, or `apply_patch` is
-blocked while the current change is unchecked. After a failed check, the model
-may make one corrective edit; the gate then requires another check. This is
-intentionally strict: projects without a recognized test/lint/build command
-should leave the gate off or add a real check.
+With `verificationGate: true`, the next code-file `edit`, `write`, or
+`apply_patch` is blocked while the current change is unchecked. Docs-only edits
+are not gated. After a failed check, the model may make one corrective edit; the
+gate then requires another check. This is intentionally strict: projects without
+a recognized test/lint/build command should leave the gate off or add a real
+check. Add project-specific commands with `verificationCommands: ["pnpm verify"]`.
 
 The `experimental.session.compacting` hook appends a harness-state block to the
 compaction context: current request, planning/todo state, edited files,

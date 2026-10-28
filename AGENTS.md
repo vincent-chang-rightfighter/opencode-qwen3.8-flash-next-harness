@@ -33,8 +33,9 @@ needed, and blocks model-spawned subagents for this deployment.
 - Keep `autoVerify: true`; track edited files and common test/lint/build
   commands, remind the model to verify, and keep failures active until a later
   check passes.
-- Keep `verificationGate: true`; block the next edit until a check runs, and
-  allow exactly one corrective edit after a failed check.
+- Keep `verificationGate: true`; block the next code-file edit until a check
+  runs, and allow exactly one corrective edit after a failed check. Docs-only
+  edits stay ungated.
 - Preserve the harness-state block in compaction.
 - Do not require todo planning for simple lookups or mechanical edits; skip
   those.

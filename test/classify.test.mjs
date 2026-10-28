@@ -4,6 +4,7 @@ import strataReasoning from "../index.js";
 import {
   classifyTask,
   editedPathsFromTool,
+  isCodePath,
   isLocalEndpoint,
   isVerificationCommand,
   matchesTarget,
@@ -222,6 +223,10 @@ test("planning is triggered for multi-step work but not lookups", () => {
 });
 
 test("verification commands and edited paths are recognized", () => {
+  assert.equal(isCodePath("src/a.ts"), true);
+  assert.equal(isCodePath("Dockerfile"), true);
+  assert.equal(isCodePath("README.md"), false);
+  assert.equal(isCodePath("package.json"), false);
   assert.equal(isVerificationCommand("npm test"), true);
   assert.equal(isVerificationCommand("npm run build"), true);
   assert.equal(isVerificationCommand("npm install"), false);
@@ -440,6 +445,36 @@ test("verification gate blocks another edit until a check runs", async () => {
         {},
       ),
     /Verification required/,
+  );
+});
+
+test("verification gate ignores docs-only edits", async () => {
+  const hooks = await strataReasoning(
+    {},
+    {
+      modelIncludes: ["qwen3.8-flash-next"],
+      autoVerify: true,
+      verificationGate: true,
+    },
+  );
+  const sessionID = "docs-gate-session";
+  await hooks["chat.params"](
+    {
+      sessionID,
+      agent: "build",
+      model: { id: "qwen3.8-flash-next-iq3_s", providerID: "strata" },
+      provider: { info: { id: "strata" } },
+      message: { parts: [{ text: "update the readme" }] },
+    },
+    { options: {}, temperature: 1 },
+  );
+  await hooks["tool.execute.after"](
+    { tool: "edit", sessionID, callID: "doc-1", args: { filePath: "README.md" } },
+    { title: "", output: "", metadata: {} },
+  );
+  await hooks["tool.execute.before"](
+    { tool: "edit", sessionID, callID: "doc-2" },
+    {},
   );
 });
 

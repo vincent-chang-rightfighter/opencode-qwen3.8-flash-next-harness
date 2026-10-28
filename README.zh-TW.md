@@ -121,7 +121,7 @@ opencode；外掛與設定不會 hot reload。
 | `disableSubagents` | `false` | 對所有本地／目標模型封鎖 `task` 工具，並加入停用子代理的 system instruction。 |
 | `autoTodo` | `false` | 對多步驟／程式碼／設計／除錯／風險工作加入 `todowrite` 規劃指引與清單提醒。 |
 | `autoVerify` | `false` | 追蹤修改檔案與 test/lint 指令、提醒驗證，並在 compaction 後保留狀態。 |
-| `verificationGate` | `false` | 檢查通過前阻擋下一次 `edit`/`write`/`apply_patch`；檢查失敗後允許一次修正修改。 |
+| `verificationGate` | `false` | 檢查通過前阻擋下一次程式碼檔案的 `edit`/`write`/`apply_patch`；純文件修改不受限制。 |
 | `verificationCommands` | `[]` | 額外視為驗證指令的子字串。 |
 | `respectExplicitEffort` | `true` | 不覆寫 model options 中已存在的 `reasoning_effort` 或 `enable_thinking`。 |
 | `overrideTemperature` | `true` | 套用上表中的 temperature。 |
@@ -265,9 +265,11 @@ opencode 的 plan agent 路徑；plugin 的 todo 規劃仍用於實際 build 回
 build，外掛會記錄成功或失敗。成功的檢查會清除提醒；失敗的檢查會保留更強烈的
 「修正後重跑」提醒，直到後續檢查通過。
 
-啟用 `verificationGate: true` 後，目前修改尚未檢查時，下一次 `edit`、`write` 或
-`apply_patch` 會被阻擋。檢查失敗後允許一次修正修改，之後必須再跑檢查。這是刻意
-偏嚴格的設定；沒有可辨識 test/lint/build 指令的專案應關閉 gate 或補上真正的檢查。
+啟用 `verificationGate: true` 後，目前程式碼修改尚未檢查時，下一次 `edit`、
+`write` 或 `apply_patch` 會被阻擋；純文件修改不受限制。檢查失敗後允許一次修正
+修改，之後必須再跑檢查。這是刻意偏嚴格的設定；沒有可辨識 test/lint/build 指令的
+專案應關閉 gate 或補上真正的檢查。可用 `verificationCommands: ["pnpm verify"]`
+加入專案自訂指令。
 
 `experimental.session.compacting` hook 會把 harness 狀態附加到 compaction context：
 目前請求、規劃／todo 狀態、修改過的檔案、驗證狀態，以及最後一次失敗檢查的尾端。

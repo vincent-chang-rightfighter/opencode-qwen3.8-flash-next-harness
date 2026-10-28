@@ -260,6 +260,16 @@ const FILE_PATH_RE = new RegExp(
   "gi",
 );
 
+const GATE_EXTENSIONS =
+  "ts|tsx|js|jsx|mjs|cjs|py|rs|go|java|kt|kts|c|cc|cpp|cxx|h|hpp|cs|php|rb|sh|bash|zsh|ps1|sql|html|css|scss|vue|svelte|ex|exs|erl|hrl|lua|swift|dart";
+const GATE_FILE_RE = new RegExp(`\\.(?:${GATE_EXTENSIONS})$`, "i");
+const GATE_FILENAME_RE = /(^|[\\/])(?:Dockerfile|Makefile|CMakeLists\.txt|Justfile)$/i;
+
+export function isCodePath(value) {
+  if (typeof value !== "string" || !value) return false;
+  return GATE_FILE_RE.test(value) || GATE_FILENAME_RE.test(value);
+}
+
 const CODE_KEYWORDS = [
   "function ",
   "def ",
