@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 const opencodeBin = process.env.OPENCODE_BIN || "opencode";
+const providerID = process.env.SMOKE_PROVIDER || "strata";
 const requests = [];
 
 const mock = createServer(async (request, response) => {
@@ -162,7 +163,7 @@ try {
     $schema: "https://opencode.ai/config.json",
     mcp: { freecad: { enabled: false } },
     provider: {
-      strata: {
+      [providerID]: {
         npm: "@ai-sdk/openai-compatible",
         name: "Mock local Qwen",
         options: {
@@ -180,8 +181,8 @@ try {
         },
       },
     },
-    model: "strata/qwen3.8-flash-next-iq3_s",
-    small_model: "strata/qwen3.8-flash-next-iq3_s",
+    model: `${providerID}/qwen3.8-flash-next-iq3_s`,
+    small_model: `${providerID}/qwen3.8-flash-next-iq3_s`,
   };
 
   await writeFile(path.join(project, "opencode.json"), JSON.stringify(config, null, 2));
@@ -211,9 +212,15 @@ try {
   }
 }
 
-const request = requests.find((body) => body?.chat_template_kwargs?.reasoning_effort);
+const expectedField = providerID === "strata" ? "chat_template_kwargs" : "reasoning_effort";
+const request = requests.find((body) =>
+  expectedField === "chat_template_kwargs"
+    ? body?.chat_template_kwargs?.reasoning_effort
+    : body?.reasoning_effort,
+);
 if (!request) {
-  console.error("opencode smoke failed: no request carried chat_template_kwargs");
+  console.error(`opencode smoke failed: no request carried ${expectedField}`);
+  console.error(JSON.stringify(requests[0], null, 2));
   console.error(
     JSON.stringify(
       requests.map((body) => ({
@@ -230,5 +237,5 @@ if (!request) {
 }
 
 console.log(
-  `opencode smoke ok: ${requests.length} request(s), reasoning_effort=${request.chat_template_kwargs.reasoning_effort}`,
+  `opencode smoke ok: ${providerID}, ${requests.length} request(s), reasoning_effort=${request.chat_template_kwargs?.reasoning_effort ?? request.reasoning_effort}`,
 );
