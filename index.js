@@ -3,6 +3,7 @@ import {
   classifyTask,
   editedPathsFromTool,
   hasExplicitEffort,
+  isLocalEndpoint,
   isVerificationCommand,
   looksLikeToolFailure,
   matchesTarget,
@@ -10,6 +11,7 @@ import {
   partsText,
   remember,
   resolveOptions,
+  resolveProviderProfile,
   shouldPlanTask,
   SUBAGENT_DISABLED_INSTRUCTION,
   PLANNING_INSTRUCTION,
@@ -29,13 +31,18 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
   const requestModelID = (input) =>
     String(input?.model?.id ?? input?.model?.modelID ?? input?.model?.name ?? "");
 
+  const addLocalProvider = (providerID) => {
+    const id = String(providerID ?? "").toLowerCase();
+    if (id && !options.localProviders.includes(id)) options.localProviders.push(id);
+  };
+
   const debug = (payload) => {
     if (!options.debug) return;
-    console.error("[strata-reasoning]", JSON.stringify(payload));
+    console.error("[qwen-harness]", JSON.stringify(payload));
     try {
       client?.app?.log?.({
         body: {
-          service: "strata-reasoning",
+          service: "qwen-harness",
           level: "info",
           message: JSON.stringify(payload),
         },
@@ -44,6 +51,18 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
   };
 
   return {
+    config: async (config) => {
+      const providers = config?.provider;
+      if (!providers || typeof providers !== "object") return;
+      for (const [providerID, provider] of Object.entries(providers)) {
+        const baseURL =
+          provider?.options?.baseURL ??
+          provider?.options?.baseUrl ??
+          provider?.baseURL;
+        if (isLocalEndpoint(baseURL)) addLocalProvider(providerID);
+      }
+    },
+
     "chat.message": async (input, output) => {
       const text = partsText(output?.parts) || messageText(output?.message);
       debug({ stage: "chat.message", sessionID: input.sessionID, textLength: text.length });
@@ -145,6 +164,14 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
 
     "chat.params": async (input, output) => {
       const state = sessions.get(input.sessionID) ?? {};
+      const providerID = String(
+        input.provider?.info?.id ?? input.provider?.id ?? input.model?.providerID ?? "",
+      ).toLowerCase();
+      const baseURL =
+        input.provider?.options?.baseURL ??
+        input.provider?.options?.baseUrl ??
+        input.provider?.baseURL;
+      if (isLocalEndpoint(baseURL)) addLocalProvider(providerID);
       if (!matchesTarget(input, options)) {
         if (state.subagentsDisabled || state.modelID || state.planning) {
           remember(sessions, input.sessionID, {
@@ -160,6 +187,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
 
       const text = messageText(input.message) || state.text || "";
       const modelID = requestModelID(input);
+      const profile = resolveProviderProfile(providerID, options);
       const subagentsDisabled = options.disableSubagents;
       const classification = classifyTask(text, options, {
         agent: input.agent,
@@ -182,20 +210,34 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
       });
 
       const existing = output.options?.chat_template_kwargs;
-      if (options.respectExplicitEffort && hasExplicitEffort(existing)) return;
+      const explicitTopLevel =
+        output.options &&
+        typeof output.options === "object" &&
+        (Object.prototype.hasOwnProperty.call(output.options, "reasoning_effort") ||
+          Object.prototype.hasOwnProperty.call(output.options, "reasoning"));
+      if (options.respectExplicitEffort && (hasExplicitEffort(existing) || explicitTopLevel)) {
+        return;
+      }
 
       if (!output.options || typeof output.options !== "object") output.options = {};
-      output.options.chat_template_kwargs = buildChatTemplateKwargs(
-        existing,
-        classification.effort,
-      );
-      if (options.overrideTemperature) output.temperature = classification.temperature;
+      if (profile.reasoning === "chat_template_kwargs") {
+        output.options.chat_template_kwargs = buildChatTemplateKwargs(
+          existing,
+          classification.effort,
+        );
+      } else if (profile.reasoning === "reasoning_effort") {
+        output.options.reasoning_effort = classification.effort;
+      }
+      if (profile.temperature && options.overrideTemperature) {
+        output.temperature = classification.temperature;
+      }
 
       debug({
         sessionID: input.sessionID,
         agent: input.agent,
-        provider: input.provider?.info?.id ?? input.provider?.id ?? null,
+        provider: providerID || null,
         model: modelID || null,
+        reasoningMode: profile.reasoning,
         kind: classification.kind,
         effort: classification.effort,
         temperature: classification.temperature,

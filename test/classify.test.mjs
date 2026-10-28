@@ -4,12 +4,128 @@ import strataReasoning from "../index.js";
 import {
   classifyTask,
   editedPathsFromTool,
+  isLocalEndpoint,
   isVerificationCommand,
+  matchesTarget,
   resolveOptions,
+  resolveProviderProfile,
   shouldPlanTask,
 } from "../lib.js";
 
 const options = resolveOptions({});
+
+test("targets local providers but not cloud providers", () => {
+  const local = resolveOptions({ modelIncludes: ["qwen3.8-flash-next"] });
+  const target = (providerID, modelID = "qwen3.8-flash-next-iq3_s") =>
+    matchesTarget(
+      { provider: { info: { id: providerID } }, model: { id: modelID } },
+      local,
+    );
+
+  assert.equal(target("strata"), true);
+  assert.equal(target("ollama"), true);
+  assert.equal(target("lmstudio"), true);
+  assert.equal(target("opencode"), false);
+  assert.equal(target("openai"), false);
+  assert.equal(target("anthropic"), false);
+  assert.equal(target("openai-compatible"), false);
+  assert.equal(target("ollama", "some-other-model"), false);
+
+  const custom = resolveOptions({
+    modelIncludes: ["qwen3.8-flash-next"],
+    localProviders: ["openai-compatible"],
+  });
+  assert.equal(
+    matchesTarget(
+      {
+        provider: { info: { id: "openai-compatible" } },
+        model: { id: "qwen3.8-flash-next-iq3_s" },
+      },
+      custom,
+    ),
+    true,
+  );
+});
+
+test("detects local endpoints", () => {
+  assert.equal(isLocalEndpoint("http://localhost:11434/v1"), true);
+  assert.equal(isLocalEndpoint("http://127.0.0.1:8080/v1"), true);
+  assert.equal(isLocalEndpoint("http://100.64.0.10:8080/v1"), true);
+  assert.equal(isLocalEndpoint("http://192.168.1.5:8000/v1"), true);
+  assert.equal(isLocalEndpoint("https://opencode.ai/v1"), false);
+  assert.equal(isLocalEndpoint("https://api.openai.com/v1"), false);
+});
+
+test("config hook registers a provider with a local baseURL", async () => {
+  const hooks = await strataReasoning(
+    {},
+    { modelIncludes: ["qwen3.8-flash-next"], localProviders: [] },
+  );
+  await hooks.config({
+    provider: {
+      "my-local": { options: { baseURL: "http://192.168.1.50:8000/v1" } },
+    },
+  });
+  const output = { options: {}, temperature: 0.7 };
+  await hooks["chat.params"](
+    {
+      sessionID: "config-session",
+      agent: "build",
+      model: { id: "qwen3.8-flash-next-iq3_s", providerID: "my-local" },
+      provider: { info: { id: "my-local" } },
+      message: { parts: [{ text: "hello" }] },
+    },
+    output,
+  );
+  assert.equal(output.temperature, 1.0);
+});
+
+test("provider profiles select the reasoning field", () => {
+  const local = resolveOptions({ modelIncludes: ["qwen3.8-flash-next"] });
+  assert.equal(resolveProviderProfile("strata", local).reasoning, "chat_template_kwargs");
+  assert.equal(resolveProviderProfile("ollama", local).reasoning, "reasoning_effort");
+  assert.equal(resolveProviderProfile("llamacpp", local).reasoning, "reasoning_effort");
+  assert.equal(resolveProviderProfile("vllm", local).reasoning, "reasoning_effort");
+  assert.equal(resolveProviderProfile("lmstudio", local).reasoning, "none");
+  assert.equal(resolveProviderProfile("unknown-local", local).reasoning, "none");
+
+  const custom = resolveOptions({
+    modelIncludes: ["qwen3.8-flash-next"],
+    providerProfiles: { "my-local": "chat_template_kwargs" },
+  });
+  assert.equal(resolveProviderProfile("my-local", custom).reasoning, "chat_template_kwargs");
+});
+
+test("chat.params writes the provider-specific reasoning field", async () => {
+  const hooks = await strataReasoning(
+    {},
+    { modelIncludes: ["qwen3.8-flash-next"] },
+  );
+  const chat = (providerID, sessionID) => ({
+    sessionID,
+    agent: "build",
+    model: { id: "qwen3.8-flash-next-iq3_s", providerID },
+    provider: { info: { id: providerID } },
+    message: { parts: [{ text: "Please implement src/a.ts" }] },
+  });
+  const output = () => ({ options: {}, temperature: 1 });
+
+  const ollama = output();
+  await hooks["chat.params"](chat("ollama", "ollama-session"), ollama);
+  assert.equal(ollama.options.reasoning_effort, "high");
+  assert.equal(ollama.options.chat_template_kwargs, undefined);
+
+  const strata = output();
+  await hooks["chat.params"](chat("strata", "strata-session"), strata);
+  assert.equal(strata.options.chat_template_kwargs.reasoning_effort, "high");
+  assert.equal(strata.options.reasoning_effort, undefined);
+
+  const lmstudio = output();
+  await hooks["chat.params"](chat("lmstudio", "lmstudio-session"), lmstudio);
+  assert.equal(lmstudio.options.reasoning_effort, undefined);
+  assert.equal(lmstudio.options.chat_template_kwargs, undefined);
+  assert.equal(lmstudio.temperature, 0.6);
+});
 
 test("code prompt gets high effort and lower temperature", () => {
   const result = classifyTask("Please refactor src/app.ts to use a helper", options);

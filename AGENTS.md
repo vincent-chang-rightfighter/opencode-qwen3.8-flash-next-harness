@@ -2,13 +2,16 @@
 
 ## Project
 
-This repository is an opencode plugin for the local Strata Qwen3.8 Flash Next
-family, including IQ3_S. It routes reasoning effort and temperature per request,
-asks the model to plan with todos when needed, and blocks model-spawned
-subagents for this deployment.
+This repository is an opencode plugin for the local or self-hosted Qwen3.8
+Flash Next family, including IQ3_S. It routes reasoning effort and temperature
+per request using a provider profile, asks the model to plan with todos when
+needed, and blocks model-spawned subagents for this deployment.
 
-- Provider target: `strata`
+- Provider target: known local provider ids, plus providers whose configured
+  `baseURL` is local/private/Tailscale; cloud providers are not targeted
 - Model target: `qwen3.8-flash-next` (all variants)
+- Reasoning profile: `strata` = `chat_template_kwargs`; Ollama/llama.cpp/vLLM =
+  `reasoning_effort`; unknown local providers = no reasoning field
 - Config: `disableSubagents: true`, `autoTodo: true`, and `autoVerify: true`
 - Subagents are disabled because local Qwen3.8 Flash Next subagents are weaker
   and much slower than doing the work directly.
@@ -33,8 +36,12 @@ subagents for this deployment.
 - Preserve the harness-state block in compaction.
 - Do not require todo planning for simple lookups or mechanical edits; skip
   those.
-- Keep the scope on local Strata Qwen3.8 Flash Next. Do not add unrelated
-  providers or models to `providers`/`modelIncludes`.
+- Keep the scope on local/self-hosted Qwen3.8 Flash Next. Target known local
+  provider ids or local `baseURL`s; use `excludeProviders` only as an explicit
+  deny list. Do not add unrelated models to `modelIncludes`.
+- Keep provider-specific reasoning in `providerProfiles`: `chat_template_kwargs`
+  for Strata, `reasoning_effort` for Ollama/llama.cpp/vLLM, `none` for unknown
+  or unreliable OpenAI-compatible endpoints.
 - Do not restore per-model subagent exceptions unless explicitly requested.
 - Keep the README options, implementation, and tests in sync.
 
@@ -52,15 +59,15 @@ subagents for this deployment.
 - Plain ESM JavaScript; no build step and no runtime dependencies.
 - Follow the existing style: 2-space indentation, double quotes, semicolons.
 - Do not add comments unless they explain something non-obvious.
-- Preserve the seven hooks: `chat.message`,
+- Preserve the config hook and these seven hooks: `chat.message`,
   `experimental.chat.messages.transform`, `chat.params`,
   `experimental.chat.system.transform`, `tool.execute.before`,
   `tool.execute.after`, and `experimental.session.compacting`.
-- `chat.message` sets the planning flag; `chat.params` marks the session;
-  `tool.execute.before` throws for `task` in a marked session; the system
-  transform adds the no-subagent, planning, and verification instructions;
-  `tool.execute.after` tracks todos, edited files, and checks; the compaction
-  hook preserves the harness state.
+- `config` adds providers with local `baseURL`s; `chat.message` sets the
+  planning flag; `chat.params` marks the session; `tool.execute.before` throws
+  for `task` in a marked session; the system transform adds the no-subagent,
+  planning, and verification instructions; `tool.execute.after` tracks todos,
+  edited files, and checks; the compaction hook preserves the harness state.
 
 ## Tests
 
@@ -76,5 +83,5 @@ subagents for this deployment.
 - Do not amend, force-push, or create empty commits.
 - Use an imperative commit subject, for example
   `Block subagents for Qwen3.8 Flash Next`.
-- Keep the user's global opencode config and the Strata server configuration out
-  of commits in this repository.
+- Keep the user's global opencode config and local inference server
+  configuration out of commits in this repository.

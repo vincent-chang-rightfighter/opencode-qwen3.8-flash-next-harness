@@ -15,9 +15,38 @@ export const VERIFICATION_REMINDER =
 export const VERIFICATION_FAILED_REMINDER =
   "The last verification command failed. Read the error, fix the cause, and rerun the check; do not claim completion.";
 
+export const PROVIDER_PROFILES = {
+  strata: { reasoning: "chat_template_kwargs", temperature: true },
+  ollama: { reasoning: "reasoning_effort", temperature: true },
+  llamacpp: { reasoning: "reasoning_effort", temperature: true },
+  "llama-cpp": { reasoning: "reasoning_effort", temperature: true },
+  "llama.cpp": { reasoning: "reasoning_effort", temperature: true },
+  "llama-server": { reasoning: "reasoning_effort", temperature: true },
+  vllm: { reasoning: "reasoning_effort", temperature: true },
+  lmstudio: { reasoning: "none", temperature: true },
+  "lm-studio": { reasoning: "none", temperature: true },
+};
+
+export const LOCAL_PROVIDERS = [
+  "strata",
+  "ollama",
+  "llamacpp",
+  "llama-cpp",
+  "llama.cpp",
+  "llama-server",
+  "vllm",
+  "lmstudio",
+  "lm-studio",
+  "local",
+  "localhost",
+];
+
 export const DEFAULTS = {
   enabled: true,
-  providers: ["strata"],
+  providers: [],
+  localProviders: LOCAL_PROVIDERS.slice(),
+  excludeProviders: [],
+  providerProfiles: {},
   modelIncludes: [],
   defaultEffort: "medium",
   codeEffort: "high",
@@ -279,6 +308,67 @@ function asStringArray(value, fallback) {
   return value.filter((item) => typeof item === "string" && item.length > 0);
 }
 
+function asProfileMap(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const profiles = {};
+  for (const [key, profile] of Object.entries(value)) {
+    if (typeof profile === "string") {
+      profiles[key.toLowerCase()] = { reasoning: profile };
+    } else if (profile && typeof profile === "object" && !Array.isArray(profile)) {
+      profiles[key.toLowerCase()] = { ...profile };
+    }
+  }
+  return profiles;
+}
+
+const REASONING_MODES = ["chat_template_kwargs", "reasoning_effort", "none"];
+
+export function isLocalEndpoint(value) {
+  if (typeof value !== "string" || !value) return false;
+  let host;
+  try {
+    host = new URL(value).hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  } catch {
+    return false;
+  }
+  if (
+    host === "localhost" ||
+    host === "::1" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host.endsWith(".ts.net") ||
+    host === "host.docker.internal" ||
+    host === "host.containers.internal"
+  ) {
+    return true;
+  }
+  return (
+    /^127\./.test(host) ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+    /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host) ||
+    /^f[cd][0-9a-f]{2}:/i.test(host) ||
+    /^fe80:/i.test(host)
+  );
+}
+
+export function resolveProviderProfile(providerID, options) {
+  const id = String(providerID ?? "").toLowerCase();
+  const override = options?.providerProfiles?.[id];
+  const source =
+    typeof override === "string"
+      ? { reasoning: override }
+      : override && typeof override === "object"
+        ? override
+        : PROVIDER_PROFILES[id] ?? {};
+  const reasoning = REASONING_MODES.includes(source.reasoning) ? source.reasoning : "none";
+  return {
+    reasoning,
+    temperature: source.temperature !== false,
+  };
+}
+
 function asEffort(value, fallback) {
   return typeof value === "string" && EFFORTS.includes(value) ? value : fallback;
 }
@@ -310,7 +400,17 @@ export function resolveOptions(raw) {
   const input = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
   return {
     enabled: asBoolean(input.enabled, DEFAULTS.enabled),
-    providers: asStringArray(input.providers, DEFAULTS.providers),
+    providers: asStringArray(input.providers, DEFAULTS.providers).map((provider) =>
+      provider.toLowerCase(),
+    ),
+    localProviders: asStringArray(input.localProviders, DEFAULTS.localProviders).map(
+      (provider) => provider.toLowerCase(),
+    ),
+    excludeProviders: asStringArray(
+      input.excludeProviders,
+      DEFAULTS.excludeProviders,
+    ).map((provider) => provider.toLowerCase()),
+    providerProfiles: asProfileMap(input.providerProfiles),
     modelIncludes: asStringArray(input.modelIncludes, DEFAULTS.modelIncludes),
     defaultEffort: asEffort(input.defaultEffort, DEFAULTS.defaultEffort),
     codeEffort: asEffort(input.codeEffort, DEFAULTS.codeEffort),
@@ -642,8 +742,12 @@ export function matchesTarget(input, options) {
   ).toLowerCase();
   if (
     options.providers.length > 0 &&
-    !options.providers.some((provider) => providerID === provider.toLowerCase())
+    !options.providers.some((provider) => providerID === provider)
   ) {
+    return false;
+  }
+  if (options.excludeProviders.includes(providerID)) return false;
+  if (options.providers.length === 0 && !options.localProviders.includes(providerID)) {
     return false;
   }
 

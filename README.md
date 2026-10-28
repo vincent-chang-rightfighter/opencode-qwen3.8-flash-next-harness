@@ -1,12 +1,12 @@
 # opencode-qwen3.8-flash-next-harness
 
-Automatic per-request reasoning-effort and temperature routing for
-[Strata](https://github.com/Niko1221/Strata) models in
-[opencode](https://opencode.ai). This project is configured for the local
-Strata Qwen3.8 Flash Next family, including IQ3_S.
+Automatic per-request reasoning-effort and temperature routing for local or
+self-hosted Qwen3.8 Flash Next models in [opencode](https://opencode.ai). It
+targets known local provider ids and providers whose configured base URL is a
+local address, as long as the model id matches `qwen3.8-flash-next`.
 
-The plugin classifies each model request with fast heuristics and sets
-`chat_template_kwargs` on the Strata OpenAI-compatible request:
+The plugin classifies each model request with fast heuristics and sets the
+reasoning field supported by the provider profile:
 
 - tool-result turns -> low effort
 - code prompts, file paths, stack traces -> high effort, lower temperature
@@ -17,9 +17,8 @@ The plugin classifies each model request with fast heuristics and sets
 - optionally ask the model to create a priority-ordered todo list for work that needs planning
 - track edited files and remind the model to verify changes with tests/lint/build
 
-It does not change the Strata model or restart the server. It only adds
-per-request parameters, so it works with a model already configured in
-opencode.
+It does not change the model or restart the server. It only adds per-request
+parameters, so it works with a model already configured in opencode.
 
 ## Harness layers
 
@@ -36,10 +35,17 @@ The full local harness has three layers:
 
 - opencode with plugin support (`@opencode-ai/plugin` >= 1.14.24; this
   repository was developed against opencode 1.19.4).
-- A Strata server whose OpenAI-compatible endpoint accepts
-  `chat_template_kwargs` (tested with Strata engine 0.1.50 and 0.1.52 /
-  Qwen3.8).
-- Provider id `strata` in `opencode.json`, unless you override `providers`.
+- A local or self-hosted OpenAI-compatible endpoint serving
+  `qwen3.8-flash-next`.
+- No `strata` provider id is required. The default targets known local provider
+  ids (`strata`, `ollama`, `llamacpp`, `vllm`, `lmstudio`, ...) and any provider
+  whose configured `baseURL` is localhost, a private network, or Tailscale.
+- Cloud providers are excluded by default because they are not in the local
+  allowlist; `excludeProviders` is only an optional explicit deny list.
+- Reasoning routing depends on the provider profile: Strata uses
+  `chat_template_kwargs`; Ollama, llama.cpp, and vLLM use top-level
+  `reasoning_effort`; unknown local providers default to no reasoning field
+  unless configured in `providerProfiles`.
 
 ## Install
 
@@ -52,7 +58,7 @@ or `.opencode/opencode.json`:
     [
       "file:///C:/path/to/opencode-qwen3.8-flash-next-harness/index.js",
       {
-        "providers": ["strata"],
+        "providers": [],
         "modelIncludes": ["qwen3.8-flash-next"],
         "defaultEffort": "medium",
         "codeEffort": "high",
@@ -77,7 +83,10 @@ plugin and config changes are not hot-reloaded.
 | Option | Default | Meaning |
 |---|---|---|
 | `enabled` | `true` | Turn the plugin off without removing it. |
-| `providers` | `["strata"]` | Provider ids to target. Empty array = all. |
+| `providers` | `[]` | Optional explicit provider-id allowlist. Empty = use the local-provider rules. |
+| `localProviders` | `LOCAL_PROVIDERS` | Known local provider ids; detected local `baseURL`s are added automatically. |
+| `excludeProviders` | `[]` | Optional explicit deny list for a local id you do not want targeted. |
+| `providerProfiles` | `{}` | Per-provider reasoning adapter overrides, keyed by provider id. |
 | `modelIncludes` | `[]` | Substrings to match against the model id. Empty = all. |
 | `defaultEffort` | `"medium"` | Effort for ordinary prompts. |
 | `codeEffort` | `"high"` | Implement/code prompts. |
@@ -106,12 +115,12 @@ plugin and config changes are not hot-reloaded.
 | `planAgents` | `["plan","architect","design"]` | Agent names treated as design. |
 | `searchAgents` | `["explore","search","recon"]` | Agent names treated as search/recon. |
 | `ignoreAgents` | `["title","summary","compaction"]` | Auxiliary agents that are never routed. |
-| `disableSubagents` | `false` | Block the `task` tool and add a no-subagent system instruction for all models targeted by `providers`/`modelIncludes`. |
+| `disableSubagents` | `false` | Block the `task` tool and add a no-subagent system instruction for all local/targeted models. |
 | `autoTodo` | `false` | Add `todowrite` planning guidance and an active-list reminder for multi-step/code/design/debug/risky work. |
 | `autoVerify` | `false` | Track edited files and test/lint commands, remind the model to verify, and preserve the state through compaction. |
 | `respectExplicitEffort` | `true` | Do not override an existing `reasoning_effort` or `enable_thinking` in model options. |
 | `overrideTemperature` | `true` | Set the temperature values above. |
-| `debug` | `false` | Log each decision to stderr and `client.app.log` under `strata-reasoning`. |
+| `debug` | `false` | Log each decision to stderr and `client.app.log` under `qwen-harness`. |
 | `ultraKeywords` | see `lib.js` | Case-insensitive keyword list. |
 | `highKeywords` | see `lib.js` | Case-insensitive keyword list. |
 | `debugKeywords` | see `lib.js` | Case-insensitive keyword list. |
@@ -121,13 +130,43 @@ plugin and config changes are not hot-reloaded.
 | `implementKeywords` | see `lib.js` | Case-insensitive keyword list. |
 | `riskKeywords` | see `lib.js` | Case-insensitive keyword list. |
 
-Effort values are `none`, `low`, `medium`, `high`, `xhigh`. When effort is
-`none`, the plugin sends `enable_thinking: false` instead of
-`reasoning_effort`.
+Effort values are `none`, `low`, `medium`, `high`, `xhigh`. For the
+`chat_template_kwargs` profile, `none` sends `enable_thinking: false`; for the
+`reasoning_effort` profile it sends `reasoning_effort: "none"`; the `none`
+profile sends no reasoning field at all.
+
+### Provider profiles
+
+The built-in profiles are:
+
+| Provider id | Reasoning field |
+|---|---|
+| `strata` | `chat_template_kwargs` (`reasoning_effort` + `enable_thinking`) |
+| `ollama` | top-level `reasoning_effort` |
+| `llamacpp`, `llama-cpp`, `llama.cpp`, `llama-server` | top-level `reasoning_effort` |
+| `vllm` | top-level `reasoning_effort` (vLLM maps it to `enable_thinking`) |
+| `lmstudio`, `lm-studio` | none by default; its OpenAI-compatible endpoint does not reliably forward reasoning controls |
+| any other local provider | none by default |
+
+Add or override a server without editing code:
+
+```json
+"providerProfiles": {
+  "my-local-server": "reasoning_effort",
+  "my-strata-fork": { "reasoning": "chat_template_kwargs", "temperature": true }
+}
+```
+
+Valid reasoning values are `chat_template_kwargs`, `reasoning_effort`, and
+`none`. A profile can set `temperature: false` if the server does not accept
+temperature. A custom provider id also needs to be added to `localProviders`
+unless its configured `baseURL` is already detected as local; a profile alone
+does not make the provider a target.
 
 ## Disabling subagents
 
-This project targets local Strata Qwen3.8 Flash Next, including IQ3_S. Its
+This project targets local or self-hosted Qwen3.8 Flash Next, including IQ3_S,
+on known local provider ids or providers detected from a local `baseURL`. Its
 `modelIncludes` is `qwen3.8-flash-next`, so every variant in that family is
 covered. For this deployment, subagents are weaker and much slower than doing
 the work directly, so the config sets `disableSubagents: true`.
@@ -140,9 +179,9 @@ The plugin:
 - throws before a `task` tool call in that session, with an error that tells
   the model to use direct tools.
 
-`disableSubagents` applies to every model selected by `providers` and
-`modelIncludes`. Keep `modelIncludes` narrow if other models must keep their
-subagents.
+`disableSubagents` applies to every model selected by the local-provider rules,
+`providers`, and `modelIncludes`. Keep `modelIncludes` narrow if other models
+must keep their subagents.
 
 This stops the model from spawning subagents. It does not stop a user from
 manually selecting an `explore` or `general` agent in opencode; that is an
@@ -228,8 +267,10 @@ inspired by those systems, not copied from them.
 
 ## How it works
 
-The plugin registers seven hooks:
+The plugin registers these hooks:
 
+- `config` scans configured provider `baseURL`s and adds local endpoints to the
+  local-provider set.
 - `chat.message` records the latest user prompt per session, decides whether it
   needs planning, and resets the tool-failure counter.
 - `experimental.chat.messages.transform` marks tool-result turns, including
@@ -259,9 +300,10 @@ The plugin registers seven hooks:
   state, edited files, and verification status into the compaction context.
 
 `@ai-sdk/openai-compatible` spreads unknown provider options into the request
-body, so the Strata server receives the field. If your provider strips unknown
-options, the plugin will have no effect; enable `debug: true` and check the
-opencode logs to see whether the hook runs.
+body, so the local server receives the field. If your provider strips unknown
+options, the reasoning part will have no effect; enable `debug: true` and check
+the opencode logs. The todo, subagent, and verification features still work
+because they run in opencode, not in the inference server.
 
 ## Limits
 
@@ -269,9 +311,13 @@ opencode logs to see whether the hook runs.
 - Tool-result detection depends on opencode's message parts and tool `state`
   shape, plus the experimental `experimental.chat.messages.transform` hook.
   It was tested with opencode 1.19.4; later versions can change the part shape.
-- The Strata server must accept per-request `chat_template_kwargs`. A server
-  config with `chat_template_kwargs.reasoning_effort` set still allows
-  request-level overrides in the tested build.
+- The local server must support the reasoning field selected by its provider
+  profile. Strata must accept per-request `chat_template_kwargs`; Ollama,
+  llama.cpp, and vLLM must accept top-level `reasoning_effort`. LM Studio's
+  OpenAI-compatible endpoint currently does not reliably forward reasoning
+  controls, so its default profile is `none`.
+- Unknown local providers get no reasoning field until a profile is added. The
+  harness features still work; only reasoning routing is skipped.
 - `disableSubagents` blocks the built-in `task` tool, not a manually selected
   agent, and assumes the tool is still named `task`.
 - `autoTodo` is prompt-level guidance; the model can still skip the todo list.
