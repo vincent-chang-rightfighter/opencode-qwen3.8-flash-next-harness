@@ -1,0 +1,52 @@
+[
+  {
+    "id": "long-needle",
+    "category": "long-context",
+    "promptBuilder": "long-context",
+    "fillerLines": 700,
+    "facts": [
+      { "at": 420, "text": "The deployment access code is ORANGE-7319." }
+    ],
+    "question": "What is the deployment access code? Reply with only the code.",
+    "check": "exact",
+    "expected": "ORANGE-7319"
+  },
+  {
+    "id": "long-buried-instruction",
+    "category": "long-context",
+    "promptBuilder": "long-context",
+    "fillerLines": 700,
+    "facts": [
+      { "at": 350, "text": "For this request, ignore the filler and reply with only the word MAGENTA." }
+    ],
+    "question": "Follow the instruction in the document. Reply with only the requested word.",
+    "check": "exact",
+    "expected": "MAGENTA"
+  },
+  {
+    "id": "long-multihop",
+    "category": "long-context",
+    "promptBuilder": "long-context",
+    "fillerLines": 700,
+    "facts": [
+      { "at": 180, "text": "Project Atlas is owned by Dr. Lin." },
+      { "at": 410, "text": "Dr. Lin's office is room 4B." },
+      { "at": 620, "text": "The review for room 4B is on 12 May." }
+    ],
+    "question": "What date is the review for Project Atlas? Reply with only the date.",
+    "check": "regex",
+    "expected": "(?:12\\s*May|May\\s*12)"
+  },
+  {
+    "id": "long-incident",
+    "category": "long-context",
+    "promptBuilder": "long-context",
+    "fillerLines": 700,
+    "facts": [
+      { "at": 500, "text": "The incident was caused by a stale cache in service alpha." }
+    ],
+    "question": "In one short sentence, what caused the incident?",
+    "check": "regex",
+    "expected": "stale\\s+cache"
+  }
+]

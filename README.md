@@ -185,6 +185,18 @@ opencode.
 | `highTemperature` | `1.0` | Temperature for design/high-keyword prompts. |
 | `ultraTemperature` | `1.0` | Temperature for ultra keywords. |
 | `simpleTemperature` | `1.0` | Temperature for simple/mechanical prompts. |
+| `nonThinkingTemperature` | `0.7` | Temperature when effort is `none`. |
+| `thinkingTopP` | `0.95` | `top_p` for thinking requests. |
+| `thinkingTopK` | `20` | `top_k` for thinking requests. |
+| `thinkingMinP` | `0` | `min_p` for thinking requests. |
+| `thinkingPresencePenalty` | `0` | `presence_penalty` for thinking requests. |
+| `thinkingRepetitionPenalty` | `1` | `repetition_penalty` for thinking requests. |
+| `nonThinkingTopP` | `0.8` | `top_p` when effort is `none`. |
+| `nonThinkingTopK` | `20` | `top_k` when effort is `none`. |
+| `nonThinkingMinP` | `0` | `min_p` when effort is `none`. |
+| `nonThinkingPresencePenalty` | `1.5` | `presence_penalty` when effort is `none`. |
+| `nonThinkingRepetitionPenalty` | `1` | `repetition_penalty` when effort is `none`. |
+| `overrideSampling` | `true` | Apply the sampling values above. |
 | `codeAgents` | `["code","coder","engineer","debug"]` | Agent names treated as code. |
 | `planAgents` | `["plan","architect","design"]` | Agent names treated as design. |
 | `searchAgents` | `["explore","search","recon"]` | Agent names treated as search/recon. |
@@ -210,6 +222,20 @@ Effort values are `none`, `low`, `medium`, `high`, `xhigh`. For the
 `chat_template_kwargs` profile, `none` sends `enable_thinking: false`; for the
 `reasoning_effort` profile it sends `reasoning_effort: "none"`; the `none`
 profile sends no reasoning field at all.
+
+### Sampling defaults
+
+The plugin follows the Qwen3.8-Flash-Next model-card sampler values unless
+`overrideSampling` is false:
+
+| Mode | temperature | top_p | top_k | min_p | presence | repetition |
+|---|---:|---:|---:|---:|---:|---:|
+| Thinking | per classification | 0.95 | 20 | 0 | 0 | 1.0 |
+| Non-thinking (`effort: none`) | 0.7 | 0.80 | 20 | 0 | 1.5 | 1.0 |
+
+The existing per-kind temperatures remain in effect; for example code and tool
+turns use 0.6 rather than the model-card thinking temperature of 1.0. Those are
+deliberate coding/tool stability choices and should be A/B tested.
 
 ### Provider selection
 
@@ -474,6 +500,37 @@ node --test test/*.test.mjs
 npm run smoke:opencode
 ```
 smoke:opencode requires opencode and this plugin to be installed in the active opencode config; it starts a headless server and a mock local provider.
+
+## Quality evaluation
+
+This is a **simple sanity check** that the model receives the intended sampling
+and harness settings. It is not a comprehensive model-quality benchmark, and a
+single 22-case run is not statistical evidence.
+
+The real-model set has 18 cases in `eval/quality-cases.json` (exact answers,
+multi-step arithmetic, logic, instruction following, and executable JavaScript)
+and 4 long-context cases in `eval/long-cases.json` (needle, buried instruction,
+multi-hop, and incident summarization).
+
+```bash
+$env:STRATA_UPSTREAM = "http://127.0.0.1:8080/v1"
+$env:STRATA_API_KEY = "your-key"
+npm run eval:quality
+npm run eval:tools
+```
+
+`eval:quality` compares thinking at 1.0, thinking at 0.6, and non-thinking at
+0.7. `EVAL_IDS=id1,id2` runs a subset. `eval:tools` uses real opencode with the
+real Strata provider and checks read, bash, todowrite, and task blocking.
+
+Initial results: the full 22-case run scored 21/22 for thinking 1.0 and 0.6 (one
+code output hit the 512-token limit) and 21/22 for non-thinking (weekday
+reasoning). After raising code output to 2,048 tokens, all 7 code cases pass in
+all three arms; the 4 long-context cases pass in all arms. The known quality
+failure is non-thinking on the weekday case. Tool evaluation passed 4/4.
+
+This measures answer quality; it is separate from the deterministic request
+contract tests and the opencode smoke test.
 
 ## License
 

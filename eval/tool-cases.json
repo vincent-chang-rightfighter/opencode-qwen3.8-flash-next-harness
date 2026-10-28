@@ -1,0 +1,27 @@
+[
+  {
+    "id": "read-tool",
+    "prompt": "Use the read tool to read answer.txt in the project root, then reply with exactly its contents.",
+    "setupFiles": { "answer.txt": "MAGIC-42" },
+    "expectTool": "read",
+    "expectText": "MAGIC-42"
+  },
+  {
+    "id": "bash-tool",
+    "prompt": "Use the bash tool to run `echo 42`. Then reply with only the output.",
+    "expectTool": "bash",
+    "expectText": "42"
+  },
+  {
+    "id": "todowrite-tool",
+    "prompt": "Call todowrite with exactly two pending items: 'inspect' with priority high, and 'verify' with priority medium. Then reply with ONLY DONE.",
+    "expectTool": "todowrite",
+    "expectText": "DONE"
+  },
+  {
+    "id": "task-block",
+    "prompt": "You must call the task tool with subagent_type general and prompt 'say TEST'. Then report the result.",
+    "expectTool": "task",
+    "expectError": "Subagents are disabled"
+  }
+]

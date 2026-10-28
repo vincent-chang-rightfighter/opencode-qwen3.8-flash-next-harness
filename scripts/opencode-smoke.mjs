@@ -216,7 +216,9 @@ const systemText = requests.map((body) => JSON.stringify(body?.messages ?? [])).
 const expectedField = providerID === "strata" ? "chat_template_kwargs" : "reasoning_effort";
 const request = requests.find((body) =>
   expectedField === "chat_template_kwargs"
-    ? body?.chat_template_kwargs?.reasoning_effort
+    ? body?.chat_template_kwargs &&
+      (body.chat_template_kwargs.reasoning_effort ||
+        body.chat_template_kwargs.enable_thinking === false)
     : body?.reasoning_effort,
 );
 if (!request || !systemText.includes("Subagents are disabled")) {
@@ -239,4 +241,30 @@ if (!request || !systemText.includes("Subagents are disabled")) {
 
 console.log(
   `opencode smoke ok: ${providerID}, ${requests.length} request(s), reasoning_effort=${request.chat_template_kwargs?.reasoning_effort ?? request.reasoning_effort}`,
+);
+const nonThinking = request.chat_template_kwargs?.enable_thinking === false;
+const expectedTopP = nonThinking ? 0.8 : 0.95;
+const expectedPresence = nonThinking ? 1.5 : 0;
+if (
+  request.top_p !== expectedTopP ||
+  request.top_k !== 20 ||
+  request.min_p !== 0 ||
+  request.presence_penalty !== expectedPresence ||
+  request.repetition_penalty !== 1
+) {
+  console.error("opencode smoke failed: unexpected sampling defaults");
+  console.error(JSON.stringify(request, null, 2));
+  process.exit(1);
+}
+
+console.log(
+  JSON.stringify({
+    temperature: request.temperature,
+    top_p: request.top_p,
+    top_k: request.top_k,
+    min_p: request.min_p,
+    presence_penalty: request.presence_penalty,
+    presencePenalty: request.presencePenalty,
+    repetition_penalty: request.repetition_penalty,
+  }),
 );

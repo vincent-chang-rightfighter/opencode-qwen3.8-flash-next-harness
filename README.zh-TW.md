@@ -180,6 +180,18 @@ server 與 mock provider，需要外掛已在 active config 中；設定
 | `highTemperature` | `1.0` | 設計／高關鍵字提示的 temperature。 |
 | `ultraTemperature` | `1.0` | ultra 關鍵字的 temperature。 |
 | `simpleTemperature` | `1.0` | 簡單／機械式提示的 temperature。 |
+| `nonThinkingTemperature` | `0.7` | effort 為 `none` 時的 temperature。 |
+| `thinkingTopP` | `0.95` | thinking 請求的 `top_p`。 |
+| `thinkingTopK` | `20` | thinking 請求的 `top_k`。 |
+| `thinkingMinP` | `0` | thinking 請求的 `min_p`。 |
+| `thinkingPresencePenalty` | `0` | thinking 請求的 `presence_penalty`。 |
+| `thinkingRepetitionPenalty` | `1` | thinking 請求的 `repetition_penalty`。 |
+| `nonThinkingTopP` | `0.8` | effort 為 `none` 時的 `top_p`。 |
+| `nonThinkingTopK` | `20` | effort 為 `none` 時的 `top_k`。 |
+| `nonThinkingMinP` | `0` | effort 為 `none` 時的 `min_p`。 |
+| `nonThinkingPresencePenalty` | `1.5` | effort 為 `none` 時的 `presence_penalty`。 |
+| `nonThinkingRepetitionPenalty` | `1` | effort 為 `none` 時的 `repetition_penalty`。 |
+| `overrideSampling` | `true` | 套用上述 sampling 值。 |
 | `codeAgents` | `["code","coder","engineer","debug"]` | 視為程式碼工作的 agent 名稱。 |
 | `planAgents` | `["plan","architect","design"]` | 視為設計工作的 agent 名稱。 |
 | `searchAgents` | `["explore","search","recon"]` | 視為搜尋／偵察工作的 agent 名稱。 |
@@ -205,6 +217,18 @@ Effort 值為 `none`、`low`、`medium`、`high`、`xhigh`。使用
 `chat_template_kwargs` profile 時，`none` 會送 `enable_thinking: false`；使用
 `reasoning_effort` profile 時，會送 `reasoning_effort: "none"`；`none`
 profile 則完全不送 reasoning 欄位。
+
+### Sampling 預設
+
+除非 `overrideSampling` 設為 false，外掛會使用 Qwen3.8-Flash-Next 模型卡的 sampler 值：
+
+| 模式 | temperature | top_p | top_k | min_p | presence | repetition |
+|---|---:|---:|---:|---:|---:|---:|
+| Thinking | 依分類 | 0.95 | 20 | 0 | 0 | 1.0 |
+| Non-thinking（`effort: none`） | 0.7 | 0.80 | 20 | 0 | 1.5 | 1.0 |
+
+各分類原本的 temperature 仍保留；例如 code 與 tool 使用 0.6，而不是模型卡
+thinking 的 1.0。這是為了 coding/tool 穩定性的刻意選擇，應做 A/B 測試。
 
 ### Provider 選擇
 
@@ -438,6 +462,34 @@ node --test test/*.test.mjs
 npm run smoke:opencode
 ```
 `smoke:opencode` 需要已安裝 opencode，且 active config 已載入此外掛；它會啟動 headless server 與 mock 本地 provider。設定 `SMOKE_PROVIDER=ollama`、`llamacpp` 或 `vllm` 可驗證 top-level `reasoning_effort` profile。
+
+## 品質評估
+
+這只是**簡單驗證模型是否收到正確的 sampling 與 harness 設定**，不是完整的模型品質
+benchmark；只跑一次 22 題也不構成統計證據。
+
+真模型測試集包含 `eval/quality-cases.json` 的 18 題（精確答案、多步算術、邏輯、
+指令遵循、可執行 JavaScript）與 `eval/long-cases.json` 的 4 題長 context
+（needle、埋在文中的指令、multi-hop、事件摘要）。
+
+```bash
+$env:STRATA_UPSTREAM = "http://127.0.0.1:8080/v1"
+$env:STRATA_API_KEY = "your-key"
+npm run eval:quality
+npm run eval:tools
+```
+
+`eval:quality` 比較 thinking 1.0、thinking 0.6、non-thinking 0.7；可用
+`EVAL_IDS=id1,id2` 跑子集。`eval:tools` 使用真 opencode + 真 Strata provider，驗證
+read、bash、todowrite 與 task blocking。
+
+首次完整 22 題：thinking 1.0 與 0.6 都是 21/22（一個 code 輸出撞到 512 token 上限），
+non-thinking 21/22（星期推理錯）。把 code 輸出上限提高到 2,048 後，7 個 code case
+在三個 arm 全部通過；4 個 long-context case 也全部通過。已知品質失敗只剩
+non-thinking 的星期題。Tool evaluation 4/4 通過。
+
+這量的是答案品質，與 deterministic request contract tests、opencode smoke test
+分開。
 
 ## 授權
 

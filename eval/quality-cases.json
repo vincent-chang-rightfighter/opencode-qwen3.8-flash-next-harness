@@ -1,0 +1,159 @@
+[
+  {
+    "id": "exact-ok",
+    "category": "instruction",
+    "prompt": "Reply with exactly: OK",
+    "check": "exact",
+    "expected": "OK"
+  },
+  {
+    "id": "math-product",
+    "category": "math",
+    "prompt": "Compute 17 * 23. Reply with only the number.",
+    "check": "exact",
+    "expected": "391"
+  },
+  {
+    "id": "math-distance",
+    "category": "math",
+    "prompt": "A train travels at 60 km/h for 2.5 hours. How far does it travel? Reply with only the number in kilometers.",
+    "check": "exact",
+    "expected": "150"
+  },
+  {
+    "id": "python-power",
+    "category": "code-reasoning",
+    "prompt": "In Python, what is the value of 2**3**2? Reply with only the number.",
+    "check": "exact",
+    "expected": "512"
+  },
+  {
+    "id": "logic-chain",
+    "category": "reasoning",
+    "prompt": "All bloops are razzies. All razzies are lazzies. Are all bloops lazzies? Reply with only yes or no.",
+    "check": "exact",
+    "expected": "yes"
+  },
+  {
+    "id": "comma-list",
+    "category": "instruction",
+    "prompt": "List exactly the numbers 1, 2, and 3 separated by commas with no spaces. Reply with only the list.",
+    "check": "exact",
+    "expected": "1,2,3"
+  },
+  {
+    "id": "js-add",
+    "maxTokens": 2048,
+    "category": "code",
+    "prompt": "Return only a JavaScript function named add that returns a + b. Do not use Markdown fences.",
+    "check": "regex",
+    "expected": "function\\s+add\\s*\\(\\s*a\\s*,\\s*b\\s*\\)\\s*\\{[^}]*return\\s+a\\s*\\+\\s*b"
+  },
+  {
+    "id": "python-even",
+    "maxTokens": 2048,
+    "category": "code",
+    "prompt": "Return only a Python function named is_even that returns True when n is even and False otherwise. Do not use Markdown fences.",
+    "check": "regex",
+    "expected": "def\\s+is_even\\s*\\(\\s*n\\s*\\)[\\s\\S]*return\\s+n\\s*%\\s*2\\s*==\\s*0"
+  }
+,
+  {
+    "id": "math-jacket",
+    "category": "math-multistep",
+    "prompt": "A jacket costs $80. It is discounted by 25%, then a 10% sales tax is added to the discounted price. What is the final price? Reply with only the number rounded to two decimals.",
+    "check": "exact",
+    "expected": "66.00"
+  },
+  {
+    "id": "math-large-product",
+    "category": "math",
+    "prompt": "Compute 1234 * 5678. Reply with only the number.",
+    "check": "exact",
+    "expected": "7006652"
+  },
+  {
+    "id": "logic-weekday",
+    "category": "reasoning",
+    "prompt": "If today is Wednesday, what day of the week will it be 100 days from now? Reply with only the day name.",
+    "check": "exact",
+    "expected": "Friday"
+  },
+  {
+    "id": "farmer-sheep",
+    "category": "reasoning",
+    "prompt": "A farmer has 17 sheep. All but 9 die. How many sheep are left? Reply with only the number.",
+    "check": "exact",
+    "expected": "9"
+  },
+  {
+    "id": "json-shape",
+    "category": "instruction",
+    "prompt": "Return only this JSON object: {\"ok\": true, \"count\": 3}. Do not use Markdown.",
+    "check": "exact",
+    "expected": "{\"ok\":true,\"count\":3}"
+  },
+  {
+    "id": "js-flatten-one",
+    "maxTokens": 2048,
+    "category": "code-execution",
+    "prompt": "Return only a JavaScript function named flattenOne(arr) that flattens one level. Do not use Markdown fences.",
+    "check": "js",
+    "function": "flattenOne",
+    "tests": [
+      { "args": [[1, [2, 3], [4]]], "expected": [1, 2, 3, 4] },
+      { "args": [[[1], [[2]]]], "expected": [1, [2]] }
+    ]
+  },
+  {
+    "id": "js-unique-order",
+    "maxTokens": 2048,
+    "category": "code-execution",
+    "prompt": "Return only a JavaScript function named uniqueOrder(arr) that removes duplicates while preserving first-occurrence order. Do not use Markdown fences.",
+    "check": "js",
+    "function": "uniqueOrder",
+    "tests": [
+      { "args": [["b", "a", "b", "c", "a"]], "expected": ["b", "a", "c"] },
+      { "args": [[3, 2, 3, 1]], "expected": [3, 2, 1] }
+    ]
+  }
+,
+  {
+    "id": "js-chunk",
+    "maxTokens": 2048,
+    "category": "code-execution",
+    "prompt": "Return only a JavaScript function named chunk(arr, size) that splits an array into chunks of the given size. Do not use Markdown fences.",
+    "check": "js",
+    "function": "chunk",
+    "tests": [
+      { "args": [[1, 2, 3, 4, 5], 2], "expected": [[1, 2], [3, 4], [5]] },
+      { "args": [[], 3], "expected": [] }
+    ]
+  },
+  {
+    "id": "js-balanced",
+    "maxTokens": 2048,
+    "category": "code-execution",
+    "prompt": "Return only a JavaScript function named balanced(s) that returns true when (), [], and {} brackets are balanced. Do not use Markdown fences.",
+    "check": "js",
+    "function": "balanced",
+    "tests": [
+      { "args": ["([]{})"], "expected": true },
+      { "args": ["([)]"], "expected": false },
+      { "args": ["("], "expected": false }
+    ]
+  },
+  {
+    "id": "js-parse-duration",
+    "maxTokens": 2048,
+    "category": "code-execution",
+    "prompt": "Return only a JavaScript function named parseDuration(s) that converts strings like 1h30m or 45s to seconds. Do not use Markdown fences.",
+    "check": "js",
+    "function": "parseDuration",
+    "tests": [
+      { "args": ["1h30m"], "expected": 5400 },
+      { "args": ["45s"], "expected": 45 },
+      { "args": ["2m"], "expected": 120 }
+    ]
+  }
+]

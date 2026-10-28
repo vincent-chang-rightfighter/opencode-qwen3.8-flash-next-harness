@@ -222,6 +222,42 @@ test("planning is triggered for multi-step work but not lookups", () => {
   assert.equal(shouldPlanTask(classifyTask("Update src/a.ts", off), off), false);
 });
 
+test("sampling follows thinking and non-thinking model-card sets", async () => {
+  const chat = (text, sessionID) => ({
+    sessionID,
+    agent: "build",
+    model: { id: "qwen3.8-flash-next-iq3_s", providerID: "strata" },
+    provider: { info: { id: "strata" } },
+    message: { parts: [{ text }] },
+  });
+  const thinking = await strataReasoning(
+    {},
+    { modelIncludes: ["qwen3.8-flash-next"] },
+  );
+  const code = { options: {}, temperature: 1 };
+  await thinking["chat.params"](chat("implement src/a.ts", "sampling-thinking"), code);
+  assert.equal(code.topP, 0.95);
+  assert.equal(code.options.top_k, 20);
+  assert.equal(code.options.min_p, 0);
+  assert.equal(code.options.presence_penalty, 0);
+  assert.equal(code.options.repetition_penalty, 1);
+  assert.equal(code.temperature, 0.6);
+
+  const nonThinking = await strataReasoning(
+    {},
+    { modelIncludes: ["qwen3.8-flash-next"], simpleEffort: "none" },
+  );
+  const simple = { options: {}, temperature: 1 };
+  await nonThinking["chat.params"](chat("hello", "sampling-simple"), simple);
+  assert.equal(simple.topP, 0.8);
+  assert.equal(simple.options.top_k, 20);
+  assert.equal(simple.options.min_p, 0);
+  assert.equal(simple.options.presence_penalty, 1.5);
+  assert.equal(simple.options.repetition_penalty, 1);
+  assert.equal(simple.temperature, 0.7);
+  assert.equal(simple.options.chat_template_kwargs.enable_thinking, false);
+});
+
 test("verification commands and edited paths are recognized", () => {
   assert.equal(isCodePath("src/a.ts"), true);
   assert.equal(isCodePath("Dockerfile"), true);

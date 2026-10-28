@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.8.7
+
+- Add executable code cases, four long-context cases, and tool-call cases.
+- Add an executable JavaScript test set for generation quality.
+- Add real read, bash, todowrite, and task-block tool evaluations.
+
+## 0.8.6
+
+- Add a 15-case real Strata quality evaluation set.
+- Cover exact answers, multi-step reasoning, instruction following, and executable JavaScript.
+- Compare thinking 1.0, thinking 0.6, and non-thinking sampling.
+
+## 0.8.5
+
+- Add Qwen model-card thinking and non-thinking sampling defaults.
+- Apply top_p, top_k, min_p, presence_penalty, and repetition_penalty per mode.
+- Use 0.7 temperature when effort is `none`.
+
 ## 0.8.4
 
 - Send top-level `reasoning_effort` through the OpenAI-compatible

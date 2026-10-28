@@ -221,6 +221,10 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         typeof state.planning === "boolean"
           ? state.planning
           : shouldPlanTask(classification, options);
+      const temperature =
+        classification.effort === "none"
+          ? options.nonThinkingTemperature
+          : classification.temperature;
 
       remember(sessions, input.sessionID, {
         ...state,
@@ -243,6 +247,26 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
       }
       appendSystemInstructions(input.message, instructions);
 
+      if (!output.options || typeof output.options !== "object") output.options = {};
+      if (options.overrideSampling) {
+        const nonThinking = classification.effort === "none";
+        const topP = nonThinking ? options.nonThinkingTopP : options.thinkingTopP;
+        const topK = nonThinking ? options.nonThinkingTopK : options.thinkingTopK;
+        const minP = nonThinking ? options.nonThinkingMinP : options.thinkingMinP;
+        const presence = nonThinking
+          ? options.nonThinkingPresencePenalty
+          : options.thinkingPresencePenalty;
+        const repetition = nonThinking
+          ? options.nonThinkingRepetitionPenalty
+          : options.thinkingRepetitionPenalty;
+        output.topP = topP;
+        output.presencePenalty = presence;
+        output.options.top_k = topK;
+        output.options.min_p = minP;
+        output.options.presence_penalty = presence;
+        output.options.repetition_penalty = repetition;
+      }
+
       const existing = output.options?.chat_template_kwargs;
       const explicitTopLevel =
         output.options &&
@@ -254,7 +278,6 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         return;
       }
 
-      if (!output.options || typeof output.options !== "object") output.options = {};
       if (profile.reasoning === "chat_template_kwargs") {
         output.options.chat_template_kwargs = buildChatTemplateKwargs(
           existing,
@@ -264,7 +287,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         output.options.reasoningEffort = classification.effort;
       }
       if (profile.temperature && options.overrideTemperature) {
-        output.temperature = classification.temperature;
+        output.temperature = temperature;
       }
 
       debug({
@@ -275,7 +298,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         reasoningMode: profile.reasoning,
         kind: classification.kind,
         effort: classification.effort,
-        temperature: classification.temperature,
+        temperature,
         reason: classification.reason,
         subagentsDisabled,
         planning,
