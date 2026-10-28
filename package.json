@@ -1,7 +1,7 @@
 {
-  "name": "opencode-strata-reasoning",
-  "version": "0.3.0",
-  "description": "Reasoning routing and subagent blocking for local Strata Qwen3.8 Flash Next in opencode.",
+  "name": "opencode-qwen3.8-flash-next-harness",
+  "version": "0.5.0",
+  "description": "Reasoning routing, todo planning, verification tracking, and subagent blocking for local Strata Qwen3.8 Flash Next in opencode.",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -23,7 +23,10 @@
     "qwen",
     "reasoning",
     "adaptive",
-    "thinking"
+    "thinking",
+    "todo",
+    "planning",
+    "verification"
   ],
   "author": "vince",
   "license": "MIT",

@@ -1,13 +1,21 @@
 import {
   buildChatTemplateKwargs,
   classifyTask,
+  editedPathsFromTool,
   hasExplicitEffort,
+  isVerificationCommand,
+  looksLikeToolFailure,
   matchesTarget,
   messageText,
   partsText,
   remember,
   resolveOptions,
+  shouldPlanTask,
   SUBAGENT_DISABLED_INSTRUCTION,
+  PLANNING_INSTRUCTION,
+  TODO_REMINDER,
+  VERIFICATION_FAILED_REMINDER,
+  VERIFICATION_REMINDER,
   toolPartsFailed,
 } from "./lib.js";
 
@@ -41,9 +49,11 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
       debug({ stage: "chat.message", sessionID: input.sessionID, textLength: text.length });
       if (text) {
         const previous = sessions.get(input.sessionID) ?? {};
+        const planning = shouldPlanTask(classifyTask(text, options), options);
         remember(sessions, input.sessionID, {
           ...previous,
           text,
+          planning,
           toolTurn: false,
           toolFailed: false,
           failures: 0,
@@ -136,11 +146,12 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
     "chat.params": async (input, output) => {
       const state = sessions.get(input.sessionID) ?? {};
       if (!matchesTarget(input, options)) {
-        if (state.subagentsDisabled || state.modelID) {
+        if (state.subagentsDisabled || state.modelID || state.planning) {
           remember(sessions, input.sessionID, {
             ...state,
             subagentsDisabled: false,
             modelID: undefined,
+            planning: false,
           });
         }
         return;
@@ -156,6 +167,10 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         toolFailed: Boolean(state.toolFailed),
         failures: state.failures ?? 0,
       });
+      const planning =
+        typeof state.planning === "boolean"
+          ? state.planning
+          : shouldPlanTask(classification, options);
 
       remember(sessions, input.sessionID, {
         ...state,
@@ -163,6 +178,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         toolTurn: false,
         modelID,
         subagentsDisabled,
+        planning,
       });
 
       const existing = output.options?.chat_template_kwargs;
@@ -185,15 +201,45 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         temperature: classification.temperature,
         reason: classification.reason,
         subagentsDisabled,
+        planning,
       });
     },
 
     "experimental.chat.system.transform": async (input, output) => {
-      if (!options.disableSubagents) return;
-      if (!matchesTarget({ model: input?.model }, options)) return;
       if (!Array.isArray(output?.system)) return;
-      if (!output.system.includes(SUBAGENT_DISABLED_INSTRUCTION)) {
+      if (!matchesTarget({ model: input?.model }, options)) return;
+
+      if (
+        options.disableSubagents &&
+        !output.system.includes(SUBAGENT_DISABLED_INSTRUCTION)
+      ) {
         output.system.push(SUBAGENT_DISABLED_INSTRUCTION);
+      }
+
+      const state = sessions.get(input.sessionID);
+
+      if (options.autoTodo) {
+        const planning =
+          typeof state?.planning === "boolean"
+            ? state.planning
+            : state?.text
+              ? shouldPlanTask(classifyTask(state.text, options), options)
+              : false;
+        const instruction = state?.todosActive ? TODO_REMINDER : PLANNING_INSTRUCTION;
+        if (planning && !output.system.includes(instruction)) {
+          output.system.push(instruction);
+        }
+      }
+
+      if (options.autoVerify) {
+        const instruction = state?.verificationFailed
+          ? VERIFICATION_FAILED_REMINDER
+          : state?.verificationPending
+            ? VERIFICATION_REMINDER
+            : null;
+        if (instruction && !output.system.includes(instruction)) {
+          output.system.push(instruction);
+        }
       }
     },
 
@@ -211,6 +257,105 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
       throw new Error(
         `Subagents are disabled for ${state.modelID || "this model"}. Do not call the task tool; complete the work with the direct tools.`,
       );
+    },
+
+    "tool.execute.after": async (input, output) => {
+      const state = sessions.get(input.sessionID) ?? {};
+
+      if (input.tool === "todowrite") {
+        const todos = input.args?.todos;
+        if (!Array.isArray(todos)) return;
+        const todosActive = todos.some(
+          (todo) => todo?.status === "pending" || todo?.status === "in_progress",
+        );
+        remember(sessions, input.sessionID, { ...state, todosActive });
+        debug({
+          stage: "tool.execute.after",
+          tool: input.tool,
+          sessionID: input.sessionID,
+          todos: todos.length,
+          todosActive,
+        });
+        return;
+      }
+
+      if (input.tool === "edit" || input.tool === "write" || input.tool === "apply_patch") {
+        const paths = editedPathsFromTool(input.tool, input.args);
+        const editedFiles = [
+          ...new Set([...(Array.isArray(state.editedFiles) ? state.editedFiles : []), ...paths]),
+        ].slice(-20);
+        remember(sessions, input.sessionID, {
+          ...state,
+          editedFiles,
+          verificationPending: true,
+        });
+        debug({
+          stage: "tool.execute.after",
+          tool: input.tool,
+          sessionID: input.sessionID,
+          paths,
+          editedFiles: editedFiles.length,
+        });
+        return;
+      }
+
+      if (input.tool !== "bash") return;
+      const command = typeof input.args?.command === "string" ? input.args.command : "";
+      if (!isVerificationCommand(command)) return;
+      const text = typeof output?.output === "string" ? output.output : "";
+      const exitCode = Number(
+        output?.metadata?.exitCode ?? output?.metadata?.exit_code ?? 0,
+      );
+      const failed =
+        (Number.isFinite(exitCode) && exitCode !== 0) || looksLikeToolFailure(text);
+      remember(sessions, input.sessionID, {
+        ...state,
+        verificationPending: failed,
+        verificationFailed: failed,
+        lastVerification: command.slice(0, 300),
+        lastVerificationOutput: failed ? text.slice(-1200) : undefined,
+      });
+      debug({
+        stage: "tool.execute.after",
+        tool: input.tool,
+        sessionID: input.sessionID,
+        verification: failed ? "failed" : "passed",
+        command: command.slice(0, 160),
+      });
+    },
+
+    "experimental.session.compacting": async (input, output) => {
+      const state = sessions.get(input.sessionID);
+      if (!state || !Array.isArray(output?.context)) return;
+      const lines = ["## Harness state (preserve)"];
+      if (state.text) {
+        lines.push(`Current request: ${String(state.text).replace(/\s+/g, " ").slice(0, 1200)}`);
+      }
+      lines.push(
+        `Planning: ${state.planning ? "active" : "idle"}; todo list: ${state.todosActive ? "active" : "idle"}`,
+      );
+      if (Array.isArray(state.editedFiles) && state.editedFiles.length > 0) {
+        lines.push(`Edited files: ${state.editedFiles.join(", ")}`);
+      }
+      lines.push(
+        `Verification: ${
+          state.verificationFailed
+            ? "failed"
+            : state.verificationPending
+              ? "pending"
+              : "not pending"
+        }`,
+      );
+      if (state.lastVerification) {
+        lines.push(`Last check: ${state.lastVerification}`);
+      }
+      if (state.verificationFailed && state.lastVerificationOutput) {
+        lines.push(`Check error (tail): ${state.lastVerificationOutput.slice(-600)}`);
+      }
+      lines.push(
+        "Rules: no subagents; use direct tools; keep the todo list current; verify before claiming completion.",
+      );
+      output.context.push(lines.join("\n"));
     },
 
     event: async ({ event }) => {

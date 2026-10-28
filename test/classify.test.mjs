@@ -1,7 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import strataReasoning from "../index.js";
-import { classifyTask, resolveOptions } from "../lib.js";
+import {
+  classifyTask,
+  editedPathsFromTool,
+  isVerificationCommand,
+  resolveOptions,
+  shouldPlanTask,
+} from "../lib.js";
 
 const options = resolveOptions({});
 
@@ -85,6 +91,159 @@ test("multi-file code stays high, not xhigh", () => {
   const result = classifyTask("Update src/a.ts and src/b.ts", options);
   assert.equal(result.kind, "implement");
   assert.equal(result.effort, "high");
+});
+
+test("planning is triggered for multi-step work but not lookups", () => {
+  const local = resolveOptions({ autoTodo: true });
+  assert.equal(shouldPlanTask(classifyTask("Update src/a.ts", local), local), true);
+  assert.equal(shouldPlanTask(classifyTask("Compare the architecture tradeoffs", local), local), true);
+  assert.equal(shouldPlanTask(classifyTask("What is the capital of France?", local), local), false);
+  assert.equal(shouldPlanTask(classifyTask("hello", local), local), false);
+  assert.equal(shouldPlanTask(classifyTask("- alpha\n- beta\n- gamma", local), local), true);
+
+  const off = resolveOptions({});
+  assert.equal(shouldPlanTask(classifyTask("Update src/a.ts", off), off), false);
+});
+
+test("verification commands and edited paths are recognized", () => {
+  assert.equal(isVerificationCommand("npm test"), true);
+  assert.equal(isVerificationCommand("npm run build"), true);
+  assert.equal(isVerificationCommand("npm install"), false);
+  assert.equal(isVerificationCommand("cargo check"), true);
+  assert.equal(isVerificationCommand("python -m pytest -q"), true);
+  assert.equal(isVerificationCommand("git status"), false);
+  assert.deepEqual(
+    editedPathsFromTool("apply_patch", {
+      patchText: "*** Update File: src/a.ts\n*** Add File: src/b.ts\n",
+    }),
+    ["src/a.ts", "src/b.ts"],
+  );
+  assert.deepEqual(editedPathsFromTool("edit", { filePath: "src/c.ts" }), ["src/c.ts"]);
+});
+
+test("system prompt asks for todowrite on planned tasks only", async () => {
+  const hooks = await strataReasoning(
+    {},
+    { modelIncludes: ["qwen3.8-flash-next"], autoTodo: true },
+  );
+  const message = (text) => ({
+    sessionID: "plan-session",
+    agent: "build",
+    message: { parts: [{ text }] },
+    parts: [{ text }],
+  });
+
+  await hooks["chat.message"]({ sessionID: "plan-session" }, message("Update src/a.ts and src/b.ts"));
+  const planned = { system: [] };
+  await hooks["experimental.chat.system.transform"](
+    {
+      sessionID: "plan-session",
+      model: { id: "qwen3.8-flash-next-iq3_s", providerID: "strata" },
+    },
+    planned,
+  );
+  const plannedText = planned.system.join("\n");
+  assert.equal(plannedText.includes("todowrite"), true);
+  assert.equal(plannedText.includes("detailed plan"), true);
+  assert.equal(plannedText.includes("reason for each"), true);
+
+  await hooks["tool.execute.after"](
+    {
+      tool: "todowrite",
+      sessionID: "plan-session",
+      callID: "todo-1",
+      args: { todos: [{ content: "step one", status: "pending", priority: "high" }] },
+    },
+    { title: "", output: "", metadata: {} },
+  );
+  const active = { system: [] };
+  await hooks["experimental.chat.system.transform"](
+    {
+      sessionID: "plan-session",
+      model: { id: "qwen3.8-flash-next-iq3_s", providerID: "strata" },
+    },
+    active,
+  );
+  assert.equal(active.system.some((line) => line.includes("Keep the active todo list current")), true);
+
+  await hooks["chat.message"]({ sessionID: "simple-session" }, message("hello"));
+  const simple = { system: [] };
+  await hooks["experimental.chat.system.transform"](
+    {
+      sessionID: "simple-session",
+      model: { id: "qwen3.8-flash-next-iq3_s", providerID: "strata" },
+    },
+    simple,
+  );
+  assert.equal(simple.system.length, 0);
+});
+
+test("verification reminders and compaction context track edits", async () => {
+  const hooks = await strataReasoning(
+    {},
+    { modelIncludes: ["qwen3.8-flash-next"], autoVerify: true },
+  );
+  const model = { id: "qwen3.8-flash-next-iq3_s", providerID: "strata" };
+  const system = async () => {
+    const output = { system: [] };
+    await hooks["experimental.chat.system.transform"](
+      { sessionID: "verify-session", model },
+      output,
+    );
+    return output.system.join("\n");
+  };
+
+  await hooks["tool.execute.after"](
+    {
+      tool: "edit",
+      sessionID: "verify-session",
+      callID: "edit-1",
+      args: { filePath: "src/a.ts" },
+    },
+    { title: "", output: "", metadata: {} },
+  );
+  assert.match(await system(), /changed files/);
+
+  await hooks["tool.execute.after"](
+    {
+      tool: "bash",
+      sessionID: "verify-session",
+      callID: "test-1",
+      args: { command: "npm test" },
+    },
+    { title: "", output: "all tests passed", metadata: { exitCode: 0 } },
+  );
+  assert.doesNotMatch(await system(), /changed files/);
+
+  await hooks["tool.execute.after"](
+    {
+      tool: "edit",
+      sessionID: "verify-session",
+      callID: "edit-2",
+      args: { filePath: "src/a.ts" },
+    },
+    { title: "", output: "", metadata: {} },
+  );
+  await hooks["tool.execute.after"](
+    {
+      tool: "bash",
+      sessionID: "verify-session",
+      callID: "test-2",
+      args: { command: "npm test" },
+    },
+    { title: "", output: "1 test failed", metadata: { exitCode: 1 } },
+  );
+  assert.match(await system(), /last verification command failed/i);
+
+  const compacted = { context: [] };
+  await hooks["experimental.session.compacting"](
+    { sessionID: "verify-session" },
+    compacted,
+  );
+  const context = compacted.context.join("\n");
+  assert.match(context, /Harness state/);
+  assert.match(context, /src\/a.ts/);
+  assert.match(context, /Verification: failed/);
 });
 
 test("task tool is blocked for the targeted local model family", async () => {

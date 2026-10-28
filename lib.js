@@ -3,6 +3,18 @@ export const EFFORTS = ["none", "low", "medium", "high", "xhigh"];
 export const SUBAGENT_DISABLED_INSTRUCTION =
   "Subagents are disabled for this model. Do not call the task tool; complete the work directly with the available tools.";
 
+export const PLANNING_INSTRUCTION =
+  "Use todowrite proactively when a task has 3 or more distinct steps, multiple deliverables, or needs planning. Before the first edit, show the user a detailed plan in the reply: the goal, ordered steps with a one-line reason for each, key risks or tradeoffs, files or areas to inspect, and how you will verify the result. Then call todowrite with a concise, prioritized list; do not only emit the tool call. Do not wait for the user to ask. Keep exactly one item in_progress, mark completed items immediately, and add follow-ups or blockers. Skip planning for single actions, simple lookups, and mechanical one-line edits.";
+
+export const TODO_REMINDER =
+  "Keep the active todo list current: exactly one item in_progress, update statuses in real time, mark completed items immediately, and keep priorities and follow-ups current. If scope or order changes, briefly explain why before updating. Do not batch completions.";
+
+export const VERIFICATION_REMINDER =
+  "You changed files since the last check. Before claiming completion, run the relevant tests, lint, typecheck, or build and inspect the diff. If a check fails, fix it and rerun.";
+
+export const VERIFICATION_FAILED_REMINDER =
+  "The last verification command failed. Read the error, fix the cause, and rerun the check; do not claim completion.";
+
 export const DEFAULTS = {
   enabled: true,
   providers: ["strata"],
@@ -31,6 +43,8 @@ export const DEFAULTS = {
   searchAgents: ["explore", "search", "recon"],
   ignoreAgents: ["title", "summary", "compaction"],
   disableSubagents: false,
+  autoTodo: false,
+  autoVerify: false,
   riskBumpSteps: 1,
   multiFileBump: 1,
   longPromptThreshold: 4000,
@@ -333,6 +347,8 @@ export function resolveOptions(raw) {
       agent.toLowerCase(),
     ),
     disableSubagents: asBoolean(input.disableSubagents, DEFAULTS.disableSubagents),
+    autoTodo: asBoolean(input.autoTodo, DEFAULTS.autoTodo),
+    autoVerify: asBoolean(input.autoVerify, DEFAULTS.autoVerify),
     riskBumpSteps: asNumber(input.riskBumpSteps, DEFAULTS.riskBumpSteps),
     multiFileBump: asNumber(input.multiFileBump, DEFAULTS.multiFileBump),
     longPromptThreshold: asNumber(input.longPromptThreshold, DEFAULTS.longPromptThreshold),
@@ -436,11 +452,41 @@ export function toolPartsFailed(parts) {
   return false;
 }
 
+const VERIFICATION_COMMAND_RE =
+  /(?:^|[;&|]\s*)(?:npm\s+(?:test|run\s+(?:test|lint|build|check|typecheck))|pnpm\s+(?:test|lint|build|check|run\s+(?:test|lint|build|check))|yarn\s+(?:test|lint|build|check)|bun\s+(?:test|run\s+(?:test|lint|build|check))|cargo\s+(?:test|check|build|clippy)|go\s+(?:test|build|vet)|dotnet\s+(?:test|build)|mvn\s+(?:test|verify|package)|gradle\s+(?:test|check|build)|make|cmake\s+--build|npx\s+(?:tsc|eslint|vitest|jest|prettier))\b|\b(?:pytest|vitest|jest|eslint|ruff|mypy|tsc|prettier|black|rustfmt|gofmt)\b/i;
+
+export function isVerificationCommand(command) {
+  return typeof command === "string" && VERIFICATION_COMMAND_RE.test(command);
+}
+
+export function editedPathsFromTool(tool, args) {
+  if (!args || typeof args !== "object") return [];
+  const paths = [];
+  if (typeof args.filePath === "string") paths.push(args.filePath);
+  if (typeof args.path === "string") paths.push(args.path);
+  if (tool === "apply_patch" && typeof args.patchText === "string") {
+    for (const match of args.patchText.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)) {
+      paths.push(match[1].trim());
+    }
+    for (const match of args.patchText.matchAll(/^\*\*\* Move to: (.+)$/gm)) {
+      paths.push(match[1].trim());
+    }
+  }
+  return paths.filter(Boolean);
+}
+
 function countFilePaths(text) {
   if (typeof text !== "string" || !text) return 0;
   const matches = text.match(FILE_PATH_RE);
   if (!matches) return 0;
   return new Set(matches.map((match) => match.toLowerCase())).size;
+}
+
+function countExplicitSteps(text) {
+  if (typeof text !== "string" || !text) return 0;
+  return text
+    .split(/\r?\n/)
+    .filter((line) => /^\s*(?:[-*]|\d+[.)])\s+\S/.test(line)).length;
 }
 
 function isSimple(text, options) {
@@ -507,6 +553,7 @@ export function classifyTask(text, options, context = {}) {
     search: hasAny(lower, options.searchKeywords),
     risk: hasAny(lower, options.riskKeywords),
     fileCount: countFilePaths(source),
+    explicitSteps: countExplicitSteps(source),
     agentCode: Boolean(agent) && options.codeAgents.includes(agent),
     agentPlan: Boolean(agent) && options.planAgents.includes(agent),
     agentSearch: Boolean(agent) && options.searchAgents.includes(agent),
@@ -611,6 +658,31 @@ export function matchesTarget(input, options) {
   }
 
   return true;
+}
+
+export function shouldPlanTask(classification, options) {
+  if (!options?.autoTodo) return false;
+  const kind = classification?.kind;
+  if (
+    kind === "simple" ||
+    kind === "search" ||
+    kind === "mechanical" ||
+    kind === "tool-success" ||
+    kind === "tool-failure" ||
+    kind === "tool-failure-repeat"
+  ) {
+    return false;
+  }
+  if (kind === "implement" || kind === "design" || kind === "debug" || kind === "ultra") {
+    return true;
+  }
+  const signals = classification?.signals ?? {};
+  return Boolean(
+    signals.risk ||
+      signals.fileCount >= 2 ||
+      signals.longPrompt ||
+      signals.explicitSteps >= 3,
+  );
 }
 
 export function remember(sessions, sessionID, value) {

@@ -1,4 +1,4 @@
-# opencode-strata-reasoning
+# opencode-qwen3.8-flash-next-harness
 
 Automatic per-request reasoning-effort and temperature routing for
 [Strata](https://github.com/Niko1221/Strata) models in
@@ -14,10 +14,23 @@ The plugin classifies each model request with fast heuristics and sets
 - short greetings and trivial edits -> low
 - everything else -> medium
 - optionally disable the `task`/subagent tool for targeted models; local Qwen3.8 Flash Next subagents are weaker and slower than doing the work directly
+- optionally ask the model to create a priority-ordered todo list for work that needs planning
+- track edited files and remind the model to verify changes with tests/lint/build
 
 It does not change the Strata model or restart the server. It only adds
 per-request parameters, so it works with a model already configured in
 opencode.
+
+## Harness layers
+
+The full local harness has three layers:
+
+- `~/.config/opencode/AGENTS.md` and project `AGENTS.md` files define the
+  working contract: inspect, plan, edit, verify, report.
+- `opencode.jsonc` manages context and safety: `tool_output`, auto compaction,
+  snapshots, and approval rules for destructive commands.
+- this plugin supplies model-specific behavior: reasoning effort, todo
+  planning, verification tracking, compaction state, and the `task` block.
 
 ## Requirements
 
@@ -37,7 +50,7 @@ or `.opencode/opencode.json`:
 {
   "plugin": [
     [
-      "file:///C:/path/to/opencode-strata-reasoning/index.js",
+      "file:///C:/path/to/opencode-qwen3.8-flash-next-harness/index.js",
       {
         "providers": ["strata"],
         "modelIncludes": ["qwen3.8-flash-next"],
@@ -45,6 +58,8 @@ or `.opencode/opencode.json`:
         "codeEffort": "high",
         "toolEffort": "low",
         "disableSubagents": true,
+        "autoTodo": true,
+        "autoVerify": true,
         "debug": true
       }
     ]
@@ -92,6 +107,8 @@ plugin and config changes are not hot-reloaded.
 | `searchAgents` | `["explore","search","recon"]` | Agent names treated as search/recon. |
 | `ignoreAgents` | `["title","summary","compaction"]` | Auxiliary agents that are never routed. |
 | `disableSubagents` | `false` | Block the `task` tool and add a no-subagent system instruction for all models targeted by `providers`/`modelIncludes`. |
+| `autoTodo` | `false` | Add `todowrite` planning guidance and an active-list reminder for multi-step/code/design/debug/risky work. |
+| `autoVerify` | `false` | Track edited files and test/lint commands, remind the model to verify, and preserve the state through compaction. |
 | `respectExplicitEffort` | `true` | Do not override an existing `reasoning_effort` or `enable_thinking` in model options. |
 | `overrideTemperature` | `true` | Set the temperature values above. |
 | `debug` | `false` | Log each decision to stderr and `client.app.log` under `strata-reasoning`. |
@@ -132,6 +149,50 @@ manually selecting an `explore` or `general` agent in opencode; that is an
 opencode UI action, not a model `task` call. The plugin also blocks nested
 `task` calls made inside such a manually started subagent session.
 
+## Planning with todos
+
+With `autoTodo: true`, the plugin adds a system instruction for targeted
+requests that need planning: 3 or more distinct steps or deliverables,
+implementation, debugging, design, ultra effort, risky work, two or more files,
+or a long prompt. It tells the model to show a detailed plan in the reply before
+the first edit: the goal, ordered steps with a one-line reason for each, key
+risks or tradeoffs, files or areas to inspect, and how verification will work.
+Only then does it call `todowrite` with a concise, prioritized list. The model
+must keep exactly one item `in_progress`, mark completed items immediately, and
+add follow-ups or blockers even when the user did not ask for a plan. Simple
+questions, searches, mechanical edits, and tool-result turns are left alone.
+
+After a `todowrite` call with pending or `in_progress` items, later requests get
+a shorter "keep the active list current" reminder instead of the full creation
+instruction. The reminder also asks for a brief explanation when scope or order
+changes. The `tool.execute.after` hook tracks that state per session.
+
+The plugin cannot invoke `todowrite` itself; this is system-prompt guidance, so
+a model can still skip it. The wording and state rules follow opencode's own
+[`todowrite` guidance](https://github.com/sst/opencode/blob/dev/packages/opencode/src/tool/todowrite.txt),
+the [v2 missing-guidance issue](https://github.com/anomalyco/opencode/issues/59259),
+and the active-list reminder pattern used by
+[opencode-todolist](https://www.opendock.net/plugins/opencode-todolist/) and
+[Subagent Todo](https://www.opendock.net/plugins/opencode-subagent-todo/).
+
+## Verification and compaction
+
+With `autoVerify: true`, the plugin watches `edit`, `write`, and `apply_patch`,
+then adds a short "you changed files since the last check" reminder. When a later
+`bash` command looks like a test, lint, typecheck, or build, the plugin records
+success or failure. A successful check clears the reminder; a failed check keeps
+a stronger "fix and rerun" reminder active until a check passes.
+
+The `experimental.session.compacting` hook appends a harness-state block to the
+compaction context: current request, planning/todo state, edited files,
+verification status, and the tail of the last failed check. This keeps the
+task anchored across long sessions, following the Focus Chain and auto-compact
+patterns used by Cline, the structured condenser used by OpenHands, and the
+plan/permission/compaction model documented by Claude Code.
+
+The command detector is heuristic. Custom or obscure verification commands may
+not be recognized, so the reminder is advisory, not a hard block.
+
 ## Classification signals
 
 The classifier follows the task-facts approach used by
@@ -167,10 +228,10 @@ inspired by those systems, not copied from them.
 
 ## How it works
 
-The plugin registers five hooks:
+The plugin registers seven hooks:
 
-- `chat.message` records the latest user prompt per session and resets the
-  tool-failure counter.
+- `chat.message` records the latest user prompt per session, decides whether it
+  needs planning, and resets the tool-failure counter.
 - `experimental.chat.messages.transform` marks tool-result turns, including
   assistant messages whose `tool` part has a completed/error state, inspects
   the tool error, and counts repeated failures.
@@ -186,10 +247,16 @@ The plugin registers five hooks:
 }
 ```
 
-- `experimental.chat.system.transform` appends the no-subagent instruction
-  when `disableSubagents` is on and the request is targeted.
+- `experimental.chat.system.transform` appends the no-subagent instruction when
+  `disableSubagents` is on, and the `todowrite` planning instruction when
+  `autoTodo` is on and the task needs planning.
 - `tool.execute.before` throws for a `task` tool call in a session marked as
   subagent-disabled.
+- `tool.execute.after` watches `todowrite`, edits, and verification commands;
+  it switches later planning prompts to the short active-list reminder and
+  tracks whether edited files still need a check.
+- `experimental.session.compacting` injects the current request, todo/plan
+  state, edited files, and verification status into the compaction context.
 
 `@ai-sdk/openai-compatible` spreads unknown provider options into the request
 body, so the Strata server receives the field. If your provider strips unknown
@@ -207,8 +274,12 @@ opencode logs to see whether the hook runs.
   request-level overrides in the tested build.
 - `disableSubagents` blocks the built-in `task` tool, not a manually selected
   agent, and assumes the tool is still named `task`.
+- `autoTodo` is prompt-level guidance; the model can still skip the todo list.
+- `autoVerify` detects common test/lint/build commands; custom scripts may not
+  be recognized, and the reminder is not a hard block.
 - The plugin does not choose models; it only adjusts a targeted model's
-  reasoning effort and temperature, and optionally blocks its `task` tool.
+  reasoning effort and temperature, optionally blocks its `task` tool, asks it
+  to plan with todos, and tracks verification state.
 
 ## Development
 
