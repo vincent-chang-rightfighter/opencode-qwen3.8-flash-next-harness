@@ -199,7 +199,7 @@ server 與 mock provider，需要外掛已在 active config 中；設定
 | `disableSubagents` | `false` | 對所有本地／目標模型封鎖 `task` 工具，並加入停用子代理的 system instruction。 |
 | `autoTodo` | `false` | 對多步驟／程式碼／設計／除錯／風險工作加入 `todowrite` 規劃指引與清單提醒。 |
 | `autoVerify` | `false` | 追蹤修改檔案與 test/lint 指令、提醒驗證，並在 compaction 後保留狀態。 |
-| `verificationGate` | `false` | 檢查通過前阻擋下一次程式碼檔案的 `edit`/`write`/`apply_patch`；純文件修改不受限制。 |
+| `verificationGate` | `false` | 檢查通過前阻擋下一次程式碼修改，但只在偵測到專案檢查或設了 `verificationCommands` 時生效。 |
 | `verificationCommands` | `[]` | 額外視為驗證指令的子字串。 |
 | `respectExplicitEffort` | `true` | 不覆寫 model options 中已存在的 `reasoning_effort` 或 `enable_thinking`。 |
 | `overrideTemperature` | `true` | 套用上表中的 temperature。 |

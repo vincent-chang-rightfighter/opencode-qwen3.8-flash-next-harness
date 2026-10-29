@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import strataReasoning from "../index.js";
 import {
   classifyTask,
@@ -416,6 +419,7 @@ test("verification gate blocks another edit until a check runs", async () => {
       modelIncludes: ["qwen3.8-flash-next"],
       autoVerify: true,
       verificationGate: true,
+      verificationCommands: ["npm test"],
     },
   );
   const sessionID = "gate-session";
@@ -495,6 +499,7 @@ test("verification gate ignores docs-only edits", async () => {
       modelIncludes: ["qwen3.8-flash-next"],
       autoVerify: true,
       verificationGate: true,
+      verificationCommands: ["npm test"],
     },
   );
   const sessionID = "docs-gate-session";
@@ -516,6 +521,79 @@ test("verification gate ignores docs-only edits", async () => {
     { tool: "edit", sessionID, callID: "doc-2" },
     {},
   );
+});
+
+test("verification gate is advisory when no project check exists", async () => {
+  const hooks = await strataReasoning(
+    {},
+    {
+      modelIncludes: ["qwen3.8-flash-next"],
+      autoVerify: true,
+      verificationGate: true,
+    },
+  );
+  const sessionID = "no-check-gate";
+  await hooks["chat.params"](
+    {
+      sessionID,
+      agent: "build",
+      model: { id: "qwen3.8-flash-next-iq3_s", providerID: "strata" },
+      provider: { info: { id: "strata" } },
+      message: { parts: [{ text: "implement src/a.ts" }] },
+    },
+    { options: {}, temperature: 1 },
+  );
+  await hooks["tool.execute.after"](
+    { tool: "edit", sessionID, callID: "edit-1", args: { filePath: "src/a.ts" } },
+    { title: "", output: "", metadata: {} },
+  );
+  await hooks["tool.execute.before"](
+    { tool: "edit", sessionID, callID: "edit-2" },
+    {},
+  );
+});
+
+test("a discovered package check enables the verification gate", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "qwen-harness-gate-"));
+  try {
+    await writeFile(
+      path.join(directory, "package.json"),
+      JSON.stringify({ scripts: { test: "node --test" } }),
+    );
+    const hooks = await strataReasoning(
+      { directory },
+      {
+        modelIncludes: ["qwen3.8-flash-next"],
+        autoVerify: true,
+        verificationGate: true,
+      },
+    );
+    const sessionID = "detected-check-gate";
+    await hooks["chat.params"](
+      {
+        sessionID,
+        agent: "build",
+        model: { id: "qwen3.8-flash-next-iq3_s", providerID: "strata" },
+        provider: { info: { id: "strata" } },
+        message: { parts: [{ text: "implement src/a.ts" }] },
+      },
+      { options: {}, temperature: 1 },
+    );
+    await hooks["tool.execute.after"](
+      { tool: "edit", sessionID, callID: "edit-1", args: { filePath: "src/a.ts" } },
+      { title: "", output: "", metadata: {} },
+    );
+    await assert.rejects(
+      () =>
+        hooks["tool.execute.before"](
+          { tool: "edit", sessionID, callID: "edit-2" },
+          {},
+        ),
+      /Verification required/,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("task tool is blocked for the targeted local model family", async () => {

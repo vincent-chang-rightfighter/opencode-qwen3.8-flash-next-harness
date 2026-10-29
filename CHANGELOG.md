@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.8
+
+- Keep verification gating advisory when no project check is available.
+- Detect package scripts, Makefile targets, and common project manifests.
+
 ## 0.8.7
 
 - Add executable code cases, four long-context cases, and tool-call cases.

@@ -1,3 +1,6 @@
+import { readFile, readdir } from "node:fs/promises";
+import path from "node:path";
+
 import {
   buildChatTemplateKwargs,
   classifyTask,
@@ -22,8 +25,54 @@ import {
   toolPartsFailed,
 } from "./lib.js";
 
+async function projectHasVerification(directory) {
+  if (!directory) return false;
+  const read = async (name) => {
+    try {
+      return await readFile(path.join(directory, name), "utf8");
+    } catch {
+      return null;
+    }
+  };
+
+  const packageText = await read("package.json");
+  if (packageText) {
+    try {
+      const scripts = JSON.parse(packageText.replace(/^\uFEFF/, "")).scripts ?? {};
+      if (Object.keys(scripts).some((name) =>
+        /^(?:test|lint|check|typecheck|build|verify)(?::|$)/i.test(name),
+      )) {
+        return true;
+      }
+    } catch {}
+  }
+
+  const makefile = await read("Makefile");
+  if (makefile && /^(?:test|lint|check|build|verify)\s*:/m.test(makefile)) return true;
+
+  for (const name of [
+    "pyproject.toml",
+    "pytest.ini",
+    "tox.ini",
+    "Cargo.toml",
+    "go.mod",
+    "pom.xml",
+    "build.gradle",
+    "CMakeLists.txt",
+  ]) {
+    if ((await read(name)) !== null) return true;
+  }
+
+  try {
+    const entries = await readdir(directory);
+    if (entries.some((name) => /\.(?:sln|csproj)$/i.test(name))) return true;
+  } catch {}
+  return false;
+}
+
 export default async function strataReasoning(pluginInput, rawOptions = {}) {
   const options = resolveOptions(rawOptions);
+  const projectHasCheck = await projectHasVerification(pluginInput?.directory);
   if (!options.enabled) return {};
 
   const client = pluginInput?.client;
@@ -361,8 +410,14 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         );
       }
 
+      const gateAvailable =
+        projectHasCheck ||
+        options.verificationCommands.length > 0 ||
+        state?.verificationSeen;
+
       if (
         options.verificationGate &&
+        gateAvailable &&
         state?.targeted &&
         ["edit", "write", "apply_patch"].includes(input.tool) &&
         state.verificationPending &&
@@ -439,6 +494,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         verificationPending: failed,
         verificationFailed: failed,
         verificationStale: false,
+        verificationSeen: true,
         gateRequired: failed ? Boolean(state.gateRequired) : false,
         lastVerification: command.slice(0, 300),
         lastVerificationOutput: failed ? text.slice(-1200) : undefined,

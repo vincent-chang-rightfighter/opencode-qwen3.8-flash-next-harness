@@ -204,7 +204,7 @@ opencode.
 | `disableSubagents` | `false` | Block the `task` tool and add a no-subagent system instruction for all local/targeted models. |
 | `autoTodo` | `false` | Add `todowrite` planning guidance and an active-list reminder for multi-step/code/design/debug/risky work. |
 | `autoVerify` | `false` | Track edited files and test/lint commands, remind the model to verify, and preserve the state through compaction. |
-| `verificationGate` | `false` | Block another code-file `edit`/`write`/`apply_patch` until a check runs; docs-only edits are not gated. |
+| `verificationGate` | `false` | Block another code-file edit until a check runs, but only when a project check is detected or `verificationCommands` is set. |
 | `verificationCommands` | `[]` | Extra command substrings that count as verification. |
 | `respectExplicitEffort` | `true` | Do not override an existing `reasoning_effort` or `enable_thinking` in model options. |
 | `overrideTemperature` | `true` | Set the temperature values above. |
