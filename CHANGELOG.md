@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.9
+
+- Add a real edit-to-verification-gate tool evaluation.
+- Accept a refusal response when the model declines to call a blocked task tool.
+
 ## 0.8.8
 
 - Keep verification gating advisory when no project check is available.

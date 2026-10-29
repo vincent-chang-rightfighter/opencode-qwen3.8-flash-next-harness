@@ -527,7 +527,7 @@ Initial results: the full 22-case run scored 21/22 for thinking 1.0 and 0.6 (one
 code output hit the 512-token limit) and 21/22 for non-thinking (weekday
 reasoning). After raising code output to 2,048 tokens, all 7 code cases pass in
 all three arms; the 4 long-context cases pass in all arms. The known quality
-failure is non-thinking on the weekday case. Tool evaluation passed 4/4.
+failure is non-thinking on the weekday case. Tool evaluation passed 5/5.
 
 This measures answer quality; it is separate from the deterministic request
 contract tests and the opencode smoke test.

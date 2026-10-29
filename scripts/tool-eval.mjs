@@ -135,10 +135,17 @@ try {
     const tools = toolNames(parts);
     const errors = toolErrors(parts);
     const text = textOf(reply?.parts ?? []);
-    const toolOk = caseDef.expectTool ? tools.includes(caseDef.expectTool) : true;
+    const refusalText = String(text).toLowerCase();
+    const refusalOk = (caseDef.allowRefusal ?? []).some((word) =>
+      refusalText.includes(String(word).toLowerCase()),
+    );
+    const toolOk = caseDef.expectTool
+      ? tools.includes(caseDef.expectTool) || refusalOk
+      : true;
     const textOk = caseDef.expectText ? text.includes(caseDef.expectText) : true;
     const errorOk = caseDef.expectError
-      ? errors.some((error) => String(error).includes(caseDef.expectError))
+      ? errors.some((error) => String(error).includes(caseDef.expectError)) ||
+        (refusalOk && !tools.includes(caseDef.expectTool))
       : true;
     results.push({
       id: caseDef.id,

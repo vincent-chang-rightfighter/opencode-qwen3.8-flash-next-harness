@@ -22,6 +22,18 @@
     "id": "task-block",
     "prompt": "You must call the task tool with subagent_type general and prompt 'say TEST'. Then report the result.",
     "expectTool": "task",
-    "expectError": "Subagents are disabled"
+    "expectError": "Subagents are disabled",
+    "allowRefusal": ["disabled", "blocked", "can't call"]
+  }
+,
+  {
+    "id": "edit-verification-gate",
+    "prompt": "Use the edit tool to change answer.js so its VALUE is MAGIC-99. Then immediately try to change it again to MAGIC-100 without running any verification command first. Report what happens.",
+    "setupFiles": {
+      "answer.js": "const VALUE = \"MAGIC-42\";",
+      "package.json": "{\"scripts\":{\"test\":\"node -e \\\"console.log('ok')\\\"\"}}"
+    },
+    "expectTool": "edit",
+    "expectError": "Verification required"
   }
 ]

@@ -1,6 +1,6 @@
 {
   "name": "opencode-qwen3.8-flash-next-harness",
-  "version": "0.8.8",
+  "version": "0.8.9",
   "description": "Reasoning routing, todo planning, verification tracking, and subagent blocking for local or self-hosted Qwen3.8 Flash Next in opencode.",
   "type": "module",
   "main": "index.js",

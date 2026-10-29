@@ -486,7 +486,7 @@ read、bash、todowrite 與 task blocking。
 首次完整 22 題：thinking 1.0 與 0.6 都是 21/22（一個 code 輸出撞到 512 token 上限），
 non-thinking 21/22（星期推理錯）。把 code 輸出上限提高到 2,048 後，7 個 code case
 在三個 arm 全部通過；4 個 long-context case 也全部通過。已知品質失敗只剩
-non-thinking 的星期題。Tool evaluation 4/4 通過。
+non-thinking 的星期題。Tool evaluation 5/5 通過。
 
 這量的是答案品質，與 deterministic request contract tests、opencode smoke test
 分開。
