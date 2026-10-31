@@ -211,6 +211,7 @@ server 與 mock provider，需要外掛已在 active config 中；設定
 | `memoryMaxAgeDays` | `90` | 忽略超過此天數的觀察。 |
 | `memoryInjectEntries` | `6` | 注入時最多考慮的記憶筆數。 |
 | `memoryMaxChars` | `3000` | 注入記憶區塊的字元上限。 |
+| `memoryRedactSecrets` | `true` | 寫入前遮蔽常見 API key、token、password 與 secret 賦值；`<private>` 一律移除。 |
 | `persistentState` | `false` | 持久化每個 session 的驗證／todo 狀態，並在 opencode 重啟後載入。 |
 | `sessionStateMaxAgeDays` | `30` | 忽略超過此天數的持久化 session 狀態。 |
 | `respectExplicitEffort` | `true` | 不覆寫 model options 中已存在的 `reasoning_effort` 或 `enable_thinking`。 |
@@ -399,9 +400,11 @@ per-session JSON。若 opencode 重啟並重用相同 session id，下一個請�
 因此未檢查的修改仍會阻擋下一次修改，驗證提醒也會保留。`session.deleted` 會刪除
 session 狀態；專案記憶會保留。
 
-兩者都會在寫入前移除 `<private>...</private>`，並遮蔽常見 API key、Bearer token、
-password 與 secret 賦值。`autoMemory` 與 `persistentState` 預設關閉，因為它們會
-建立本地檔案。需要自訂位置時請設定 `memoryDir`。
+兩者都會在寫入前移除 `<private>...</private>`。預設
+`memoryRedactSecrets: true` 會再遮蔽常見 API key、Bearer token、password 與 secret
+賦值。只有在信任的單機環境、且誤遮比保留更麻煩時才設為 `false`；此時
+`<private>` 仍會生效。`autoMemory` 與 `persistentState` 預設關閉，因為它們會建立
+本地檔案。需要自訂位置時請設定 `memoryDir`。
 
 ## 分類訊號
 

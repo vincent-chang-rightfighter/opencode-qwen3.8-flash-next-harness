@@ -50,7 +50,8 @@ needed, and blocks model-spawned subagents for this deployment.
   or unreliable OpenAI-compatible endpoints.
 - Do not restore per-model subagent exceptions unless explicitly requested.
 - Keep memory and session-state writes opt-in, local-only, and free of full
-  prompts, full tool output, assistant replies, and unredacted secrets.
+  prompts, full tool output, and assistant replies. Remove `<private>` blocks
+  always; redact common secrets by default via `memoryRedactSecrets`.
 - Keep the README options, implementation, and tests in sync.
 
 ## File writing

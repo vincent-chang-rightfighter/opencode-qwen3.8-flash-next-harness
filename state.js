@@ -19,19 +19,19 @@ const BOOLEAN_FIELDS = [
   "requestCaptured",
 ];
 
-function normalizeTextArray(value, maxItems = 20) {
+function normalizeTextArray(value, maxItems = 20, redactSecrets = true) {
   if (!Array.isArray(value)) return [];
   return [
     ...new Set(
       value
         .filter((item) => typeof item === "string" && item.trim())
-        .map((item) => sanitizeMemoryText(item, 300))
+        .map((item) => sanitizeMemoryText(item, 300, redactSecrets))
         .filter(Boolean),
     ),
   ].slice(-maxItems);
 }
 
-export function normalizeState(value) {
+export function normalizeState(value, redactSecrets = true) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const state = { version: 1 };
   for (const field of BOOLEAN_FIELDS) {
@@ -41,17 +41,17 @@ export function normalizeState(value) {
   if (Number.isFinite(failures)) state.failures = Math.max(0, Math.min(3, Math.floor(failures)));
   const updatedAt = Number(value.updatedAt);
   state.updatedAt = Number.isFinite(updatedAt) ? updatedAt : Date.now();
-  if (typeof value.text === "string") state.text = sanitizeMemoryText(value.text, 1200);
-  if (typeof value.modelID === "string") state.modelID = sanitizeMemoryText(value.modelID, 200);
+  if (typeof value.text === "string") state.text = sanitizeMemoryText(value.text, 1200, redactSecrets);
+  if (typeof value.modelID === "string") state.modelID = sanitizeMemoryText(value.modelID, 200, redactSecrets);
   if (typeof value.lastToolKey === "string") {
-    state.lastToolKey = sanitizeMemoryText(value.lastToolKey, 200);
+    state.lastToolKey = sanitizeMemoryText(value.lastToolKey, 200, redactSecrets);
   }
-  state.editedFiles = normalizeTextArray(value.editedFiles);
+  state.editedFiles = normalizeTextArray(value.editedFiles, 20, redactSecrets);
   if (typeof value.lastVerification === "string") {
-    state.lastVerification = sanitizeMemoryText(value.lastVerification, 300);
+    state.lastVerification = sanitizeMemoryText(value.lastVerification, 300, redactSecrets);
   }
   if (typeof value.lastVerificationOutput === "string") {
-    state.lastVerificationOutput = sanitizeMemoryText(value.lastVerificationOutput, 1200);
+    state.lastVerificationOutput = sanitizeMemoryText(value.lastVerificationOutput, 1200, redactSecrets);
   }
   return state;
 }
@@ -63,6 +63,7 @@ export function createStateStore(options = {}) {
       ? Math.max(1, options.maxAgeDays)
       : 30;
   const dir = path.join(dataDir, "sessions");
+  const redactSecrets = options.redactSecrets !== false;
   let queue = Promise.resolve();
 
   const fileFor = (sessionID) => path.join(dir, `${sessionKey(sessionID)}.json`);
@@ -91,7 +92,7 @@ export function createStateStore(options = {}) {
         } catch {
           return null;
         }
-        const state = normalizeState(parsed);
+        const state = normalizeState(parsed, redactSecrets);
         if (!state) return null;
         if (Date.now() - state.updatedAt > maxAgeDays * 86400000) return null;
         return state;
@@ -99,7 +100,7 @@ export function createStateStore(options = {}) {
     },
     save(sessionID, value) {
       return run(async () => {
-        const state = normalizeState({ ...value, updatedAt: Date.now() });
+        const state = normalizeState({ ...value, updatedAt: Date.now() }, redactSecrets);
         if (!state) return;
         await mkdir(dir, { recursive: true });
         const file = fileFor(sessionID);

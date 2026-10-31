@@ -120,12 +120,14 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         projectRoot,
         maxEntries: options.memoryMaxEntries,
         maxAgeDays: options.memoryMaxAgeDays,
+        redactSecrets: options.memoryRedactSecrets,
       })
     : null;
   const stateStore = options.persistentState
     ? createStateStore({
         dataDir,
         maxAgeDays: options.sessionStateMaxAgeDays,
+        redactSecrets: options.memoryRedactSecrets,
       })
     : null;
 

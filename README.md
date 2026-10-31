@@ -217,6 +217,7 @@ opencode.
 | `memoryMaxAgeDays` | `90` | Ignore observations older than this. |
 | `memoryInjectEntries` | `6` | Maximum memory entries considered for injection. |
 | `memoryMaxChars` | `3000` | Character budget for the injected memory block. |
+| `memoryRedactSecrets` | `true` | Redact common API-key, token, password, and secret assignments before writing. `<private>` is always removed. |
 | `persistentState` | `false` | Persist per-session verification/todo state and reload it after an opencode restart. |
 | `sessionStateMaxAgeDays` | `30` | Ignore persisted session state older than this. |
 | `respectExplicitEffort` | `true` | Do not override an existing `reasoning_effort` or `enable_thinking` in model options. |
@@ -429,10 +430,13 @@ session id, the next request hydrates that state, so an unchecked edit still
 blocks another edit and the verification reminder survives. Session state is
 deleted on `session.deleted`; project memory remains.
 
-Both features strip `<private>...</private>` blocks and redact common API-key,
-bearer-token, password, and secret assignments before writing. `autoMemory` and
-`persistentState` are opt-in because they create local data files. Set
-`memoryDir` explicitly when a separate location is required.
+Both features always strip `<private>...</private>` blocks. With the default
+`memoryRedactSecrets: true`, they also redact common API-key, bearer-token,
+password, and secret assignments before writing. Set it to `false` only for a
+trusted local setup where false positives are worse than retaining those values;
+the `<private>` filter remains active. `autoMemory` and `persistentState` are
+opt-in because they create local data files. Set `memoryDir` explicitly when a
+separate location is required.
 
 ## Classification signals
 

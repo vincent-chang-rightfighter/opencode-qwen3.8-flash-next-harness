@@ -94,6 +94,7 @@ export const DEFAULTS = {
   memoryMaxAgeDays: 90,
   memoryInjectEntries: 6,
   memoryMaxChars: 3000,
+  memoryRedactSecrets: true,
   persistentState: false,
   sessionStateMaxAgeDays: 30,
   riskBumpSteps: 1,
@@ -508,6 +509,10 @@ export function resolveOptions(raw) {
     memoryMaxAgeDays: asNumber(input.memoryMaxAgeDays, DEFAULTS.memoryMaxAgeDays),
     memoryInjectEntries: asNumber(input.memoryInjectEntries, DEFAULTS.memoryInjectEntries),
     memoryMaxChars: asNumber(input.memoryMaxChars, DEFAULTS.memoryMaxChars),
+    memoryRedactSecrets: asBoolean(
+      input.memoryRedactSecrets,
+      DEFAULTS.memoryRedactSecrets,
+    ),
     persistentState: asBoolean(input.persistentState, DEFAULTS.persistentState),
     sessionStateMaxAgeDays: asNumber(
       input.sessionStateMaxAgeDays,

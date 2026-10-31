@@ -42,6 +42,17 @@ test("memory text strips private blocks and common secrets", () => {
   assert.match(text, /redacted/);
 });
 
+test("secret redaction is optional but private blocks are always removed", () => {
+  const text = "api_key=abc123 <private>top secret</private>";
+  const redacted = sanitizeMemoryText(text, 1200, true);
+  assert.doesNotMatch(redacted, /abc123/);
+  assert.doesNotMatch(redacted, /top secret/);
+
+  const unredacted = sanitizeMemoryText(text, 1200, false);
+  assert.match(unredacted, /abc123/);
+  assert.doesNotMatch(unredacted, /top secret/);
+});
+
 test("project keys are stable and project-scoped", () => {
   const root = path.join(tmpdir(), "memory-project");
   assert.equal(projectKey(root), projectKey(root));
@@ -119,6 +130,25 @@ test("memory store captures and recalls project observations", async () => {
   }
 });
 
+test("memory store can disable secret redaction while keeping private filtering", async () => {
+  const dataDir = await tempDir("qwen-memory-raw-data-");
+  const projectRoot = await tempDir("qwen-memory-raw-project-");
+  try {
+    const store = createMemoryStore({ dataDir, projectRoot, redactSecrets: false });
+    await store.captureRequest({
+      sessionID: "session-raw",
+      text: "api_key=abc123 <private>hidden</private>",
+      kind: "implement",
+    });
+    const raw = await readFile(store.file, "utf8");
+    assert.match(raw, /abc123/);
+    assert.doesNotMatch(raw, /hidden/);
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test("state store persists verification state without private text", async () => {
   const dataDir = await tempDir("qwen-state-data-");
   try {
@@ -140,6 +170,22 @@ test("state store persists verification state without private text", async () =>
     assert.doesNotMatch(raw, /secret/);
     await store.delete("session-a");
     assert.equal(await store.load("session-a"), null);
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("state store can disable secret redaction while keeping private filtering", async () => {
+  const dataDir = await tempDir("qwen-state-raw-data-");
+  try {
+    const store = createStateStore({ dataDir, redactSecrets: false });
+    await store.save("session-raw", {
+      targeted: true,
+      text: "api_key=abc123 <private>hidden</private>",
+    });
+    const raw = await readFile(store.fileFor("session-raw"), "utf8");
+    assert.match(raw, /abc123/);
+    assert.doesNotMatch(raw, /hidden/);
   } finally {
     await rm(dataDir, { recursive: true, force: true });
   }

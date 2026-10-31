@@ -38,18 +38,20 @@ export function defaultDataDir() {
   return path.join(homedir(), ".local", "share", "opencode-qwen-harness");
 }
 
-export function sanitizeMemoryText(value, maxLength = 1200) {
+export function sanitizeMemoryText(value, maxLength = 1200, redactSecrets = true) {
   let text = String(value ?? "");
   text = text.replace(PRIVATE_BLOCK_RE, " ").replace(PRIVATE_TAG_RE, " ");
-  text = text.replace(SECRET_RE, "[redacted]");
-  text = text.replace(BEARER_RE, "Bearer [redacted]");
-  text = text.replace(ASSIGNMENT_RE, "$1[redacted]");
+  if (redactSecrets) {
+    text = text.replace(SECRET_RE, "[redacted]");
+    text = text.replace(BEARER_RE, "Bearer [redacted]");
+    text = text.replace(ASSIGNMENT_RE, "$1[redacted]");
+  }
   text = text.replace(/\u0000/g, "").trim();
   return text.slice(0, maxLength);
 }
 
-export function oneLine(value, maxLength = 240) {
-  const text = sanitizeMemoryText(value, maxLength * 4)
+export function oneLine(value, maxLength = 240, redactSecrets = true) {
+  const text = sanitizeMemoryText(value, maxLength * 4, redactSecrets)
     .replace(/\s+/g, " ")
     .trim();
   return text.slice(0, maxLength);
@@ -70,21 +72,21 @@ function observationID() {
   return `${Date.now().toString(36)}-${randomBytes(4).toString("hex")}`;
 }
 
-function asStringArray(value, maxLength, maxItems = 20) {
+function asStringArray(value, maxLength, maxItems = 20, redactSecrets = true) {
   if (!Array.isArray(value)) return [];
   return [
     ...new Set(
       value
         .filter((item) => typeof item === "string" && item.trim())
-        .map((item) => sanitizeMemoryText(item, maxLength))
+        .map((item) => sanitizeMemoryText(item, maxLength, redactSecrets))
         .filter(Boolean),
     ),
   ].slice(0, maxItems);
 }
 
-export function normalizeObservation(value) {
+export function normalizeObservation(value, redactSecrets = true) {
   if (!value || typeof value !== "object") return null;
-  const summary = oneLine(value.summary, 300);
+  const summary = oneLine(value.summary, 300, redactSecrets);
   if (!summary) return null;
   const kind = ["request", "edit", "verification", "error", "todo", "note"].includes(value.kind)
     ? value.kind
@@ -97,18 +99,22 @@ export function normalizeObservation(value) {
     sessionID: String(value.sessionID ?? "").slice(0, 160),
     kind,
     summary,
-    files: asStringArray(value.files, 200),
+    files: asStringArray(value.files, 200, 20, redactSecrets),
     command:
-      typeof value.command === "string" ? sanitizeMemoryText(value.command, 300) : undefined,
+      typeof value.command === "string"
+        ? sanitizeMemoryText(value.command, 300, redactSecrets)
+        : undefined,
     status:
-      typeof value.status === "string" ? sanitizeMemoryText(value.status, 40) : undefined,
-    tags: asStringArray(value.tags, 40),
+      typeof value.status === "string"
+        ? sanitizeMemoryText(value.status, 40, redactSecrets)
+        : undefined,
+    tags: asStringArray(value.tags, 40, 20, redactSecrets),
   };
 }
 
-function parseObservation(line) {
+function parseObservation(line, redactSecrets = true) {
   try {
-    return normalizeObservation(JSON.parse(line));
+    return normalizeObservation(JSON.parse(line), redactSecrets);
   } catch {
     return null;
   }
@@ -207,6 +213,7 @@ export function createMemoryStore(options = {}) {
   const file = path.join(dir, "observations.jsonl");
   const maxEntries = normalizeLimit(options.maxEntries, 500);
   const maxAgeDays = normalizeLimit(options.maxAgeDays, 90);
+  const redactSecrets = options.redactSecrets !== false;
   let cache = null;
   let queue = Promise.resolve();
 
@@ -239,7 +246,7 @@ export function createMemoryStore(options = {}) {
     const parsed = raw
       .split(/\r?\n/)
       .filter(Boolean)
-      .map(parseObservation)
+      .map((line) => parseObservation(line, redactSecrets))
       .filter(Boolean)
       .filter((observation) => Date.parse(observation.ts) >= minTime)
       .slice(-maxEntries * 2);
@@ -258,7 +265,7 @@ export function createMemoryStore(options = {}) {
 
   const append = (value) =>
     run(async () => {
-      const observation = normalizeObservation(value);
+      const observation = normalizeObservation(value, redactSecrets);
       if (!observation) return null;
       const entries = await loadUnlocked();
       entries.push(observation);
@@ -283,12 +290,12 @@ export function createMemoryStore(options = {}) {
       return append({
         sessionID,
         kind: "request",
-        summary: oneLine(text, 220),
+        summary: oneLine(text, 220, redactSecrets),
         tags: kind ? [kind] : [],
       });
     },
     captureEdit({ sessionID, tool, files }) {
-      const paths = asStringArray(files, 200);
+      const paths = asStringArray(files, 200, 20, redactSecrets);
       return append({
         sessionID,
         kind: "edit",
@@ -298,11 +305,11 @@ export function createMemoryStore(options = {}) {
       });
     },
     captureVerification({ sessionID, command, failed, output }) {
-      const detail = failed ? oneLine(output, 300) : "";
+      const detail = failed ? oneLine(output, 300, redactSecrets) : "";
       return append({
         sessionID,
         kind: "verification",
-        summary: `Verification ${failed ? "failed" : "passed"}: ${oneLine(command, 180)}${detail ? ` — ${detail}` : ""}`,
+        summary: `Verification ${failed ? "failed" : "passed"}: ${oneLine(command, 180, redactSecrets)}${detail ? ` — ${detail}` : ""}`,
         command,
         status: failed ? "failed" : "passed",
       });
@@ -311,7 +318,7 @@ export function createMemoryStore(options = {}) {
       return append({
         sessionID,
         kind: "error",
-        summary: `Command failed: ${oneLine(command, 180)} — ${oneLine(output, 300)}`,
+        summary: `Command failed: ${oneLine(command, 180, redactSecrets)} — ${oneLine(output, 300, redactSecrets)}`,
         command,
         status: "failed",
       });
