@@ -20,6 +20,8 @@ reasoning field supported by the provider profile:
 - optionally disable the `task`/subagent tool for targeted models; local Qwen3.8 Flash Next subagents are weaker and slower than doing the work directly
 - optionally ask the model to create a priority-ordered todo list for work that needs planning
 - track edited files and remind the model to verify changes with tests/lint/build
+- optionally persist project memory (edits, checks, failures, and decisions) and inject a small relevant block in later sessions
+- optionally persist session verification state so the gate survives an opencode restart
 
 It does not change the model or restart the server. It only adds per-request
 parameters, so it works with a model already configured in opencode.
@@ -33,7 +35,8 @@ The full local harness has three layers:
 - `opencode.jsonc` manages context and safety: `tool_output`, auto compaction,
   snapshots, and approval rules for destructive commands.
 - this plugin supplies model-specific behavior: reasoning effort, todo
-  planning, verification tracking, compaction state, and the `task` block.
+  planning, verification tracking, project memory, persistent session state,
+  compaction state, and the `task` block.
 
 ## Requirements
 
@@ -84,6 +87,8 @@ or `.opencode/opencode.json`:
         "autoTodo": true,
         "autoVerify": true,
         "verificationGate": true,
+        "autoMemory": true,
+        "persistentState": true,
         "debug": true
       }
     ]
@@ -206,6 +211,14 @@ opencode.
 | `autoVerify` | `false` | Track edited files and test/lint commands, remind the model to verify, and preserve the state through compaction. |
 | `verificationGate` | `false` | Block another code-file edit until a check runs, but only when a project check is detected or `verificationCommands` is set. |
 | `verificationCommands` | `[]` | Extra command substrings that count as verification. |
+| `autoMemory` | `false` | Capture project observations and inject a compact relevant block once per user turn. |
+| `memoryDir` | `""` | Data directory for project memory and session state. Empty uses `~/.local/share/opencode-qwen-harness`. |
+| `memoryMaxEntries` | `500` | Maximum observations kept per project. |
+| `memoryMaxAgeDays` | `90` | Ignore observations older than this. |
+| `memoryInjectEntries` | `6` | Maximum memory entries considered for injection. |
+| `memoryMaxChars` | `3000` | Character budget for the injected memory block. |
+| `persistentState` | `false` | Persist per-session verification/todo state and reload it after an opencode restart. |
+| `sessionStateMaxAgeDays` | `30` | Ignore persisted session state older than this. |
 | `respectExplicitEffort` | `true` | Do not override an existing `reasoning_effort` or `enable_thinking` in model options. |
 | `overrideTemperature` | `true` | Set the temperature values above. |
 | `debug` | `false` | Log each decision to stderr and `client.app.log` under `qwen-harness`. |
@@ -394,6 +407,33 @@ The command detector is heuristic. Custom or obscure verification commands may
 not be recognized, so the reminder itself is advisory; `verificationGate` is the
 hard block, and it only works when the project has a recognized check.
 
+## Project memory and persistent state
+
+With `autoMemory: true`, the plugin keeps a local, project-scoped memory under
+`memoryDir` (default `~/.local/share/opencode-qwen-harness`). It records compact
+observations only: request summaries, edited files, verification pass/fail,
+failed commands, and todo-list state. It does not store full prompts, full tool
+outputs, or assistant replies.
+
+Before the first model request of a user turn, it ranks earlier-session
+observations by query terms, recency, and kind, then appends at most
+`memoryInjectEntries` entries within `memoryMaxChars` to the message system
+prompt. The block is labeled "Project memory" and explicitly marked as possibly
+stale. It is not a semantic/vector database; it uses local keyword/recency
+ranking and has no worker or network dependency.
+
+Session state is separate. With `persistentState: true`, verification pending,
+failed, stale, gate-required, edited files, and todo state are written to a
+per-session JSON file under `memoryDir`. If opencode restarts and reuses the
+session id, the next request hydrates that state, so an unchecked edit still
+blocks another edit and the verification reminder survives. Session state is
+deleted on `session.deleted`; project memory remains.
+
+Both features strip `<private>...</private>` blocks and redact common API-key,
+bearer-token, password, and secret assignments before writing. `autoMemory` and
+`persistentState` are opt-in because they create local data files. Set
+`memoryDir` explicitly when a separate location is required.
+
 ## Classification signals
 
 The classifier follows the task-facts approach used by
@@ -434,13 +474,15 @@ The plugin registers these hooks:
 - `config` scans configured provider `baseURL`s and adds local endpoints to the
   local-provider set.
 - `chat.message` records the latest user prompt per session, decides whether it
-  needs planning, and resets the tool-failure counter.
+  needs planning, resets the tool-failure counter, and captures a compact project
+  request observation when memory is enabled.
 - `experimental.chat.messages.transform` marks tool-result turns, including
   assistant messages whose `tool` part has a completed/error state, inspects
-  the tool error, and counts repeated failures.
-- `chat.params` classifies the prompt, tracks which model the session uses,
-  appends the harness instructions to the current message's system field, and
-  writes the provider-specific reasoning options:
+  the tool error, counts repeated failures, and persists tool-turn state.
+- `chat.params` hydrates persisted session state, classifies the prompt, tracks
+  which model the session uses, recalls project memory once per user turn,
+  appends the harness instructions and memory block to the current message's
+  system field, and writes the provider-specific reasoning options:
 
 ```json
 {
@@ -457,10 +499,14 @@ The plugin registers these hooks:
 - `tool.execute.before` throws for a `task` tool call in a session marked as
   subagent-disabled.
 - `tool.execute.after` watches `todowrite`, edits, and verification commands;
-  it switches later planning prompts to the short active-list reminder and
-  tracks whether edited files still need a check.
-- `experimental.session.compacting` injects the current request, todo/plan
-  state, edited files, and verification status into the compaction context.
+  it switches later planning prompts to the short active-list reminder, tracks
+  whether edited files still need a check, persists the state, and captures
+  compact project observations.
+- `experimental.session.compacting` hydrates state and injects the current
+  request, todo/plan state, edited files, and verification status into the
+  compaction context.
+- `event` removes a persisted session-state file when opencode deletes the
+  session; project memory is retained.
 
 `@ai-sdk/openai-compatible` spreads unknown provider options into the request
 body, so the local server receives the field. If your provider strips unknown
@@ -487,9 +533,19 @@ because they run in opencode, not in the inference server.
 - `autoVerify` detects common test/lint/build commands; custom scripts may not
   be recognized. `verificationGate` is hard, so use it only where a recognized
   check exists.
+- Project memory is keyword/recency based, not semantic retrieval. It stores
+  compact observations, not full transcripts, and may inject stale or irrelevant
+  notes. The injected block is explicitly marked as possibly stale.
+- Persistent state only survives if opencode reuses the same session id. If
+  opencode creates a new session, project memory remains but per-session
+  verification state does not.
+- `autoMemory` and `persistentState` write local files; keep them off if that is
+  not acceptable. Use `memoryDir` to choose the location and remove it to clear
+  all stored memory and session state.
 - The plugin does not choose models; it only adjusts a targeted model's
   reasoning effort and temperature, optionally blocks its `task` tool, asks it
-  to plan with todos, and tracks verification state.
+  to plan with todos, tracks verification state, and can persist local project
+  memory.
 
 ## Development
 

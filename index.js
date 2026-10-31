@@ -1,6 +1,8 @@
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
+import { createMemoryStore } from "./memory.js";
+import { createStateStore } from "./state.js";
 import {
   buildChatTemplateKwargs,
   classifyTask,
@@ -109,6 +111,60 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
     } catch {}
   };
 
+  const projectRoot =
+    pluginInput?.worktree ?? pluginInput?.directory ?? process.cwd();
+  const dataDir = options.memoryDir || undefined;
+  const memoryStore = options.autoMemory
+    ? createMemoryStore({
+        dataDir,
+        projectRoot,
+        maxEntries: options.memoryMaxEntries,
+        maxAgeDays: options.memoryMaxAgeDays,
+      })
+    : null;
+  const stateStore = options.persistentState
+    ? createStateStore({
+        dataDir,
+        maxAgeDays: options.sessionStateMaxAgeDays,
+      })
+    : null;
+
+  const hydrate = async (sessionID) => {
+    if (!sessionID) return {};
+    if (sessions.has(sessionID)) return sessions.get(sessionID) ?? {};
+    let loaded = null;
+    if (stateStore) {
+      try {
+        loaded = await stateStore.load(sessionID);
+      } catch (error) {
+        debug({ stage: "state.load", sessionID, error: String(error?.message ?? error) });
+      }
+    }
+    const state = loaded ?? {};
+    remember(sessions, sessionID, state);
+    return state;
+  };
+
+  const persist = async (sessionID) => {
+    if (!stateStore || !sessionID) return;
+    const state = sessions.get(sessionID);
+    if (!state || state.targeted !== true) return;
+    try {
+      await stateStore.save(sessionID, state);
+    } catch (error) {
+      debug({ stage: "state.save", sessionID, error: String(error?.message ?? error) });
+    }
+  };
+
+  const captureMemory = async (method, payload) => {
+    if (!memoryStore || typeof memoryStore[method] !== "function") return;
+    try {
+      await memoryStore[method](payload);
+    } catch (error) {
+      debug({ stage: "memory.capture", method, error: String(error?.message ?? error) });
+    }
+  };
+
   return {
     config: async (config) => {
       const providers = config?.provider;
@@ -126,8 +182,9 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
       const text = partsText(output?.parts) || messageText(output?.message);
       debug({ stage: "chat.message", sessionID: input.sessionID, textLength: text.length });
       if (text) {
-        const previous = sessions.get(input.sessionID) ?? {};
-        const planning = shouldPlanTask(classifyTask(text, options), options);
+        const previous = await hydrate(input.sessionID);
+        const classification = classifyTask(text, options);
+        const planning = shouldPlanTask(classification, options);
         const sourceModel = output?.message?.model ?? input.model;
         const model = sourceModel
           ? {
@@ -138,6 +195,20 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         const targeted = model
           ? matchesTarget({ model }, options)
           : Boolean(previous.targeted);
+        const agent = String(input.agent ?? "").toLowerCase();
+        const captureRequest = Boolean(
+          memoryStore &&
+            targeted &&
+            classification.kind !== "simple" &&
+            !options.ignoreAgents.includes(agent),
+        );
+        if (captureRequest) {
+          await captureMemory("captureRequest", {
+            sessionID: input.sessionID,
+            text,
+            kind: classification.kind,
+          });
+        }
         remember(sessions, input.sessionID, {
           ...previous,
           text,
@@ -147,7 +218,10 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
           toolFailed: false,
           failures: 0,
           lastToolKey: undefined,
+          memoryInjected: false,
+          requestCaptured: captureRequest,
         });
+        await persist(input.sessionID);
       }
     },
 
@@ -170,7 +244,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         }
       }
 
-      const previous = sessions.get(sessionID);
+      const previous = await hydrate(sessionID);
       const role = info?.role ?? last?.role ?? null;
       const parts = last?.parts ?? info?.parts ?? [];
       const hasToolPart = Array.isArray(parts)
@@ -210,6 +284,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         failures,
         lastToolKey: toolKey,
       });
+      await persist(sessionID);
       debug({
         stage: "transform",
         sessionID,
@@ -233,7 +308,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
     },
 
     "chat.params": async (input, output) => {
-      const state = sessions.get(input.sessionID) ?? {};
+      const state = (await hydrate(input.sessionID)) ?? {};
       const providerID = String(
         input.provider?.info?.id ?? input.provider?.id ?? input.model?.providerID ?? "",
       ).toLowerCase();
@@ -250,7 +325,9 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
             modelID: undefined,
             planning: false,
             targeted: false,
+            memoryInjected: false,
           });
+          await persist(input.sessionID);
         }
         return;
       }
@@ -274,6 +351,43 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         classification.effort === "none"
           ? options.nonThinkingTemperature
           : classification.temperature;
+      const captureRequest = Boolean(
+        memoryStore &&
+          !state.requestCaptured &&
+          !state.toolTurn &&
+          classification.kind !== "simple" &&
+          text,
+      );
+      if (captureRequest) {
+        await captureMemory("captureRequest", {
+          sessionID: input.sessionID,
+          text,
+          kind: classification.kind,
+        });
+      }
+      const wantsMemory = Boolean(
+        memoryStore &&
+          !state.memoryInjected &&
+          !state.toolTurn &&
+          classification.kind !== "simple",
+      );
+      let memoryBlock = "";
+      if (wantsMemory) {
+        try {
+          memoryBlock = await memoryStore.recall({
+            query: text,
+            sessionID: input.sessionID,
+            limit: options.memoryInjectEntries,
+            maxChars: options.memoryMaxChars,
+          });
+        } catch (error) {
+          debug({
+            stage: "memory.recall",
+            sessionID: input.sessionID,
+            error: String(error?.message ?? error),
+          });
+        }
+      }
 
       remember(sessions, input.sessionID, {
         ...state,
@@ -283,7 +397,10 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         subagentsDisabled,
         planning,
         targeted: true,
+        memoryInjected: Boolean(state.memoryInjected || wantsMemory),
+        requestCaptured: Boolean(state.requestCaptured || captureRequest),
       });
+      await persist(input.sessionID);
 
       const instructions = [];
       if (subagentsDisabled) instructions.push(SUBAGENT_DISABLED_INSTRUCTION);
@@ -294,6 +411,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         if (state.verificationFailed) instructions.push(VERIFICATION_FAILED_REMINDER);
         else if (state.verificationPending) instructions.push(VERIFICATION_REMINDER);
       }
+      if (memoryBlock) instructions.push(memoryBlock);
       appendSystemInstructions(input.message, instructions);
 
       if (!output.options || typeof output.options !== "object") output.options = {};
@@ -356,7 +474,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
 
     "experimental.chat.system.transform": async (input, output) => {
       if (!Array.isArray(output?.system)) return;
-      const state = sessions.get(input.sessionID);
+      const state = await hydrate(input.sessionID);
       const targeted =
         state?.targeted === true ||
         (state?.targeted !== false && matchesTarget({ model: input?.model }, options));
@@ -395,7 +513,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
     },
 
     "tool.execute.before": async (input) => {
-      const state = sessions.get(input.sessionID);
+      const state = await hydrate(input.sessionID);
 
       if (input.tool === "task" && options.disableSubagents && state?.subagentsDisabled) {
         debug({
@@ -438,7 +556,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
     },
 
     "tool.execute.after": async (input, output) => {
-      const state = sessions.get(input.sessionID) ?? {};
+      const state = (await hydrate(input.sessionID)) ?? {};
 
       if (input.tool === "todowrite") {
         const todos = input.args?.todos;
@@ -446,7 +564,16 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         const todosActive = todos.some(
           (todo) => todo?.status === "pending" || todo?.status === "in_progress",
         );
+        const previousActive = Boolean(state.todosActive);
         remember(sessions, input.sessionID, { ...state, todosActive });
+        await persist(input.sessionID);
+        if (memoryStore && state.targeted && previousActive !== todosActive) {
+          await captureMemory("captureTodo", {
+            sessionID: input.sessionID,
+            active: todosActive,
+            count: todos.length,
+          });
+        }
         debug({
           stage: "tool.execute.after",
           tool: input.tool,
@@ -470,6 +597,14 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
           verificationStale: true,
           gateRequired: Boolean(state.gateRequired) || codeChanged,
         });
+        await persist(input.sessionID);
+        if (memoryStore && state.targeted) {
+          await captureMemory("captureEdit", {
+            sessionID: input.sessionID,
+            tool: input.tool,
+            files: paths,
+          });
+        }
         debug({
           stage: "tool.execute.after",
           tool: input.tool,
@@ -482,34 +617,52 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
 
       if (input.tool !== "bash") return;
       const command = typeof input.args?.command === "string" ? input.args.command : "";
-      if (!isVerificationCommand(command, options.verificationCommands)) return;
       const text = typeof output?.output === "string" ? output.output : "";
       const exitCode = Number(
         output?.metadata?.exitCode ?? output?.metadata?.exit_code ?? 0,
       );
       const failed =
         (Number.isFinite(exitCode) && exitCode !== 0) || looksLikeToolFailure(text);
-      remember(sessions, input.sessionID, {
-        ...state,
-        verificationPending: failed,
-        verificationFailed: failed,
-        verificationStale: false,
-        verificationSeen: true,
-        gateRequired: failed ? Boolean(state.gateRequired) : false,
-        lastVerification: command.slice(0, 300),
-        lastVerificationOutput: failed ? text.slice(-1200) : undefined,
-      });
-      debug({
-        stage: "tool.execute.after",
-        tool: input.tool,
-        sessionID: input.sessionID,
-        verification: failed ? "failed" : "passed",
-        command: command.slice(0, 160),
-      });
+      if (isVerificationCommand(command, options.verificationCommands)) {
+        remember(sessions, input.sessionID, {
+          ...state,
+          verificationPending: failed,
+          verificationFailed: failed,
+          verificationStale: false,
+          verificationSeen: true,
+          gateRequired: failed ? Boolean(state.gateRequired) : false,
+          lastVerification: command.slice(0, 300),
+          lastVerificationOutput: failed ? text.slice(-1200) : undefined,
+        });
+        await persist(input.sessionID);
+        if (memoryStore && state.targeted) {
+          await captureMemory("captureVerification", {
+            sessionID: input.sessionID,
+            command,
+            failed,
+            output: text,
+          });
+        }
+        debug({
+          stage: "tool.execute.after",
+          tool: input.tool,
+          sessionID: input.sessionID,
+          verification: failed ? "failed" : "passed",
+          command: command.slice(0, 160),
+        });
+        return;
+      }
+      if (memoryStore && state.targeted && failed) {
+        await captureMemory("captureError", {
+          sessionID: input.sessionID,
+          command,
+          output: text,
+        });
+      }
     },
 
     "experimental.session.compacting": async (input, output) => {
-      const state = sessions.get(input.sessionID);
+      const state = await hydrate(input.sessionID);
       if (!state || !Array.isArray(output?.context)) return;
       const lines = ["## Harness state (preserve)"];
       if (state.text) {
@@ -545,7 +698,10 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
     event: async ({ event }) => {
       if (event?.type === "session.deleted") {
         const sessionID = event.properties?.sessionID;
-        if (sessionID) sessions.delete(sessionID);
+        if (sessionID) {
+          sessions.delete(sessionID);
+          if (stateStore) await stateStore.delete(sessionID);
+        }
       }
     },
   };

@@ -88,6 +88,14 @@ export const DEFAULTS = {
   autoVerify: false,
   verificationGate: false,
   verificationCommands: [],
+  autoMemory: false,
+  memoryDir: "",
+  memoryMaxEntries: 500,
+  memoryMaxAgeDays: 90,
+  memoryInjectEntries: 6,
+  memoryMaxChars: 3000,
+  persistentState: false,
+  sessionStateMaxAgeDays: 30,
   riskBumpSteps: 1,
   multiFileBump: 1,
   longPromptThreshold: 4000,
@@ -327,6 +335,10 @@ const CODE_KEYWORDS = [
 const TOOL_FAILURE_RE =
   /(?:^|\n)\s*(?:error|fatal|panic|traceback|exception)\b|command not found|permission denied|no such file|exit (?:code|status) [1-9]|tests? failed|assertion failed|segmentation fault|timed out|timeout after|\bFAILED\b/i;
 
+function asString(value, fallback) {
+  return typeof value === "string" ? value.trim() : fallback;
+}
+
 function asStringArray(value, fallback) {
   if (!Array.isArray(value)) return fallback.slice();
   return value.filter((item) => typeof item === "string" && item.length > 0);
@@ -489,6 +501,17 @@ export function resolveOptions(raw) {
     verificationCommands: asStringArray(
       input.verificationCommands,
       DEFAULTS.verificationCommands,
+    ),
+    autoMemory: asBoolean(input.autoMemory, DEFAULTS.autoMemory),
+    memoryDir: asString(input.memoryDir, DEFAULTS.memoryDir),
+    memoryMaxEntries: asNumber(input.memoryMaxEntries, DEFAULTS.memoryMaxEntries),
+    memoryMaxAgeDays: asNumber(input.memoryMaxAgeDays, DEFAULTS.memoryMaxAgeDays),
+    memoryInjectEntries: asNumber(input.memoryInjectEntries, DEFAULTS.memoryInjectEntries),
+    memoryMaxChars: asNumber(input.memoryMaxChars, DEFAULTS.memoryMaxChars),
+    persistentState: asBoolean(input.persistentState, DEFAULTS.persistentState),
+    sessionStateMaxAgeDays: asNumber(
+      input.sessionStateMaxAgeDays,
+      DEFAULTS.sessionStateMaxAgeDays,
     ),
     riskBumpSteps: asNumber(input.riskBumpSteps, DEFAULTS.riskBumpSteps),
     multiFileBump: asNumber(input.multiFileBump, DEFAULTS.multiFileBump),

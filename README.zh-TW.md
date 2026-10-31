@@ -20,6 +20,8 @@ reasoning 欄位：
 - 可選擇對目標模型停用 `task`/subagent；本地 Qwen3.8 Flash Next 的子代理較弱也較慢
 - 可選擇要求模型為需要規劃的工作建立依優先級排序的 todo 清單
 - 追蹤修改過的檔案，並提醒模型用 test/lint/build 驗證
+- 可選擇保存專案記憶（修改、檢查、失敗與決策），並在之後的 session 注入少量相關內容
+- 可選擇持久化 session 驗證狀態，讓 verification gate 在 opencode 重啟後仍有效
 
 它不會更換模型，也不會重啟 server；只會加入每次請求的參數，因此可直接套用在
 opencode 已設定好的模型上。
@@ -33,7 +35,7 @@ opencode 已設定好的模型上。
 - `opencode.jsonc` 管理 context 與安全：`tool_output`、自動 compaction、
   snapshot，以及破壞性指令的核准規則。
 - 此外掛提供模型專屬行為：reasoning effort、todo 規劃、驗證追蹤、
-  compaction 狀態，以及 `task` 封鎖。
+  專案記憶、持久化 session 狀態、compaction 狀態，以及 `task` 封鎖。
 
 ## 需求
 
@@ -83,6 +85,8 @@ cd opencode-qwen3.8-flash-next-harness
         "autoTodo": true,
         "autoVerify": true,
         "verificationGate": true,
+        "autoMemory": true,
+        "persistentState": true,
         "debug": true
       }
     ]
@@ -201,6 +205,14 @@ server 與 mock provider，需要外掛已在 active config 中；設定
 | `autoVerify` | `false` | 追蹤修改檔案與 test/lint 指令、提醒驗證，並在 compaction 後保留狀態。 |
 | `verificationGate` | `false` | 檢查通過前阻擋下一次程式碼修改，但只在偵測到專案檢查或設了 `verificationCommands` 時生效。 |
 | `verificationCommands` | `[]` | 額外視為驗證指令的子字串。 |
+| `autoMemory` | `false` | 擷取專案觀察，並在每個使用者回合注入一次精簡的相關記憶。 |
+| `memoryDir` | `""` | 專案記憶與 session 狀態的資料目錄；空值使用 `~/.local/share/opencode-qwen-harness`。 |
+| `memoryMaxEntries` | `500` | 每個專案保留的最大觀察數。 |
+| `memoryMaxAgeDays` | `90` | 忽略超過此天數的觀察。 |
+| `memoryInjectEntries` | `6` | 注入時最多考慮的記憶筆數。 |
+| `memoryMaxChars` | `3000` | 注入記憶區塊的字元上限。 |
+| `persistentState` | `false` | 持久化每個 session 的驗證／todo 狀態，並在 opencode 重啟後載入。 |
+| `sessionStateMaxAgeDays` | `30` | 忽略超過此天數的持久化 session 狀態。 |
 | `respectExplicitEffort` | `true` | 不覆寫 model options 中已存在的 `reasoning_effort` 或 `enable_thinking`。 |
 | `overrideTemperature` | `true` | 套用上表中的 temperature。 |
 | `debug` | `false` | 將每次決策寫到 stderr 與 `client.app.log`，service 名稱為 `qwen-harness`。 |
@@ -369,6 +381,28 @@ OpenHands 的結構化 condenser，以及 Claude Code 的 plan/permission/compac
 指令偵測是啟發式的。自訂或冷門的驗證指令可能不會被辨識，因此提醒是建議性質，
 不是強制封鎖。
 
+## 專案記憶與持久化狀態
+
+啟用 `autoMemory: true` 後，外掛會在 `memoryDir`（預設
+`~/.local/share/opencode-qwen-harness`）保存本地、依專案隔離的記憶。它只記錄精簡
+觀察：請求摘要、修改檔案、驗證成功／失敗、失敗指令與 todo 狀態；不保存完整
+prompt、完整工具輸出或 assistant 回覆。
+
+每個使用者回合的第一個模型請求前，外掛會依查詢詞、時間與類型排序先前 session 的
+觀察，並在 `memoryMaxChars` 預算內注入最多 `memoryInjectEntries` 筆到 message
+system。區塊標示為「Project memory」並明確提醒可能過時。這不是 semantic/vector
+資料庫，而是本地 keyword/recency 排序，不需要 worker 或網路。
+
+Session 狀態是分開的。啟用 `persistentState: true` 後，verification pending、
+failed、stale、gate-required、修改檔案與 todo 狀態會寫入 `memoryDir` 下的
+per-session JSON。若 opencode 重啟並重用相同 session id，下一個請求會載入狀態，
+因此未檢查的修改仍會阻擋下一次修改，驗證提醒也會保留。`session.deleted` 會刪除
+session 狀態；專案記憶會保留。
+
+兩者都會在寫入前移除 `<private>...</private>`，並遮蔽常見 API key、Bearer token、
+password 與 secret 賦值。`autoMemory` 與 `persistentState` 預設關閉，因為它們會
+建立本地檔案。需要自訂位置時請設定 `memoryDir`。
+
 ## 分類訊號
 
 分類器參考
@@ -403,12 +437,13 @@ task-facts 方法（類別、風險、範圍）、
 外掛註冊以下 hooks：
 
 - `config` 掃描 provider 設定的 `baseURL`，把本地 endpoint 加入本地 provider 集合。
-- `chat.message` 記錄每個 session 最新的使用者提示、判斷是否需要規劃，並重設
-  工具失敗計數。
+- `chat.message` 記錄每個 session 最新的使用者提示、判斷是否需要規劃、重設
+  工具失敗計數，並在啟用記憶時擷取精簡的專案請求觀察。
 - `experimental.chat.messages.transform` 標記工具結果回合，包括 `tool` part 為
-  completed/error 的 assistant 訊息，檢查工具錯誤並計算重複失敗次數。
-- `chat.params` 分類提示、追蹤 session 使用的模型，把 harness 指令附加到目前訊息
-  的 system 欄位，並寫入 provider 專屬的 reasoning 選項：
+  completed/error 的 assistant 訊息，檢查工具錯誤、計算重複失敗次數並持久化狀態。
+- `chat.params` 載入持久化 session 狀態、分類提示、追蹤 session 使用的模型、
+  每個使用者回合召回一次專案記憶，把 harness 指令與記憶區塊附加到目前訊息的
+  system 欄位，並寫入 provider 專屬的 reasoning 選項：
 
 ```json
 {
@@ -424,9 +459,11 @@ task-facts 方法（類別、風險、範圍）、
   加上訊息 system 欄位。
 - `tool.execute.before` 對標記為停用子代理的 session 中的 `task` 呼叫丟出錯誤。
 - `tool.execute.after` 監看 `todowrite`、修改與驗證指令；後續規劃提示會改用簡短的
-  active-list 提醒，並追蹤修改過的檔案是否仍需要檢查。
-- `experimental.session.compacting` 把目前請求、todo／plan 狀態、修改檔案與驗證
-  狀態注入 compaction context。
+  active-list 提醒、追蹤修改過的檔案是否仍需要檢查、持久化狀態，並擷取精簡的
+  專案觀察。
+- `experimental.session.compacting` 載入狀態後，把目前請求、todo／plan 狀態、
+  修改檔案與驗證狀態注入 compaction context。
+- `event` 在 opencode 刪除 session 時移除持久化 session 狀態檔；專案記憶會保留。
 
 `@ai-sdk/openai-compatible` 會把未知的 provider options 展開到 request body，因此
 本地 server 會收到該欄位。若 provider 會剝離未知 options，reasoning 部分就不會有
@@ -450,8 +487,14 @@ task-facts 方法（類別、風險、範圍）、
 - `autoTodo` 是 prompt 層級指引；模型仍可能跳過 todo 清單。
 - `autoVerify` 會偵測常見 test/lint/build 指令；自訂 script 可能不會被辨識。
   `verificationGate` 是硬性阻擋，請只在專案有可辨識檢查時開啟。
+- 專案記憶使用 keyword/recency，不是 semantic retrieval。它只存精簡觀察，不存完整
+  對話，可能注入過時或不相關內容；注入區塊會明確標示可能過時。
+- 持久化狀態只在 opencode 重用相同 session id 時有效；若建立新 session，專案記憶
+  仍在，但 per-session 驗證狀態不會延續。
+- `autoMemory` 與 `persistentState` 會寫入本地檔案；不接受時請保持關閉。可用
+  `memoryDir` 指定位置，刪除該目錄即可清除所有記憶與 session 狀態。
 - 外掛不選擇模型；它只調整目標模型的 reasoning effort 與 temperature、可選擇封鎖
-  其 `task` 工具、要求它以 todo 規劃，並追蹤驗證狀態。
+  其 `task` 工具、要求它以 todo 規劃、追蹤驗證狀態，並可保存本地專案記憶。
 
 ## 開發
 
