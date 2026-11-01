@@ -131,39 +131,97 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
       })
     : null;
 
+  const elapsed = (started) => Math.round(performance.now() - started);
+  const pendingStateTimers = new Map();
+
   const hydrate = async (sessionID) => {
     if (!sessionID) return {};
     if (sessions.has(sessionID)) return sessions.get(sessionID) ?? {};
+    const started = performance.now();
     let loaded = null;
     if (stateStore) {
       try {
         loaded = await stateStore.load(sessionID);
       } catch (error) {
-        debug({ stage: "state.load", sessionID, error: String(error?.message ?? error) });
+        debug({
+          stage: "state.load",
+          sessionID,
+          error: String(error?.message ?? error),
+          durationMs: elapsed(started),
+        });
       }
     }
     const state = loaded ?? {};
     remember(sessions, sessionID, state);
+    if (options.debug) {
+      debug({ stage: "state.hydrate", sessionID, loaded: Boolean(loaded), durationMs: elapsed(started) });
+    }
     return state;
   };
 
-  const persist = async (sessionID) => {
+  const saveStateNow = async (sessionID) => {
     if (!stateStore || !sessionID) return;
     const state = sessions.get(sessionID);
     if (!state || state.targeted !== true) return;
+    const started = performance.now();
     try {
       await stateStore.save(sessionID, state);
+      if (options.debug) {
+        debug({ stage: "state.save", sessionID, durationMs: elapsed(started) });
+      }
     } catch (error) {
-      debug({ stage: "state.save", sessionID, error: String(error?.message ?? error) });
+      debug({
+        stage: "state.save",
+        sessionID,
+        error: String(error?.message ?? error),
+        durationMs: elapsed(started),
+      });
     }
+  };
+
+  const persist = async (sessionID, { immediate = false } = {}) => {
+    if (!stateStore || !sessionID) return;
+    const state = sessions.get(sessionID);
+    if (!state || state.targeted !== true) return;
+    const pending = pendingStateTimers.get(sessionID);
+    if (pending) {
+      clearTimeout(pending);
+      pendingStateTimers.delete(sessionID);
+    }
+    if (immediate) {
+      await saveStateNow(sessionID);
+      return;
+    }
+    const timer = setTimeout(() => {
+      pendingStateTimers.delete(sessionID);
+      void saveStateNow(sessionID);
+    }, 150);
+    timer.unref?.();
+    pendingStateTimers.set(sessionID, timer);
+  };
+
+  const cancelPersist = (sessionID) => {
+    const pending = pendingStateTimers.get(sessionID);
+    if (!pending) return;
+    clearTimeout(pending);
+    pendingStateTimers.delete(sessionID);
   };
 
   const captureMemory = async (method, payload) => {
     if (!memoryStore || typeof memoryStore[method] !== "function") return;
+    const started = performance.now();
     try {
       await memoryStore[method](payload);
+      if (options.debug) {
+        debug({ stage: "memory.capture", method, durationMs: elapsed(started) });
+      }
     } catch (error) {
-      debug({ stage: "memory.capture", method, error: String(error?.message ?? error) });
+      debug({
+        stage: "memory.capture",
+        method,
+        error: String(error?.message ?? error),
+        durationMs: elapsed(started),
+      });
     }
   };
 
@@ -181,6 +239,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
     },
 
     "chat.message": async (input, output) => {
+      const started = performance.now();
       const text = partsText(output?.parts) || messageText(output?.message);
       debug({ stage: "chat.message", sessionID: input.sessionID, textLength: text.length });
       if (text) {
@@ -224,10 +283,14 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
           requestCaptured: captureRequest,
         });
         await persist(input.sessionID);
+        if (options.debug) {
+          debug({ stage: "chat.message.done", sessionID: input.sessionID, durationMs: elapsed(started) });
+        }
       }
     },
 
     "experimental.chat.messages.transform": async (_input, output) => {
+      const started = performance.now();
       const messages = Array.isArray(output?.messages) ? output.messages : [];
       if (messages.length === 0) return;
 
@@ -286,7 +349,6 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         failures,
         lastToolKey: toolKey,
       });
-      await persist(sessionID);
       debug({
         stage: "transform",
         sessionID,
@@ -295,6 +357,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         toolTurn,
         toolFailed,
         failures,
+        durationMs: elapsed(started),
         hasParts: Array.isArray(parts),
         partTypes: Array.isArray(parts) ? parts.map((part) => part?.type ?? null) : [],
         toolStates: Array.isArray(parts)
@@ -310,6 +373,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
     },
 
     "chat.params": async (input, output) => {
+      const started = performance.now();
       const state = (await hydrate(input.sessionID)) ?? {};
       const providerID = String(
         input.provider?.info?.id ?? input.provider?.id ?? input.model?.providerID ?? "",
@@ -329,7 +393,6 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
             targeted: false,
             memoryInjected: false,
           });
-          await persist(input.sessionID);
         }
         return;
       }
@@ -375,6 +438,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
       );
       let memoryBlock = "";
       if (wantsMemory) {
+        const recallStarted = performance.now();
         try {
           memoryBlock = await memoryStore.recall({
             query: text,
@@ -387,6 +451,15 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
             stage: "memory.recall",
             sessionID: input.sessionID,
             error: String(error?.message ?? error),
+            durationMs: elapsed(recallStarted),
+          });
+        }
+        if (options.debug) {
+          debug({
+            stage: "memory.recall",
+            sessionID: input.sessionID,
+            chars: memoryBlock.length,
+            durationMs: elapsed(recallStarted),
           });
         }
       }
@@ -402,7 +475,6 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         memoryInjected: Boolean(state.memoryInjected || wantsMemory),
         requestCaptured: Boolean(state.requestCaptured || captureRequest),
       });
-      await persist(input.sessionID);
 
       const instructions = [];
       if (subagentsDisabled) instructions.push(SUBAGENT_DISABLED_INSTRUCTION);
@@ -471,6 +543,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         reason: classification.reason,
         subagentsDisabled,
         planning,
+        durationMs: elapsed(started),
       });
     },
 
@@ -558,6 +631,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
     },
 
     "tool.execute.after": async (input, output) => {
+      const started = performance.now();
       const state = (await hydrate(input.sessionID)) ?? {};
 
       if (input.tool === "todowrite") {
@@ -568,7 +642,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
         );
         const previousActive = Boolean(state.todosActive);
         remember(sessions, input.sessionID, { ...state, todosActive });
-        await persist(input.sessionID);
+        await persist(input.sessionID, { immediate: true });
         if (memoryStore && state.targeted && previousActive !== todosActive) {
           await captureMemory("captureTodo", {
             sessionID: input.sessionID,
@@ -580,6 +654,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
           stage: "tool.execute.after",
           tool: input.tool,
           sessionID: input.sessionID,
+          durationMs: elapsed(started),
           todos: todos.length,
           todosActive,
         });
@@ -599,7 +674,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
           verificationStale: true,
           gateRequired: Boolean(state.gateRequired) || codeChanged,
         });
-        await persist(input.sessionID);
+        await persist(input.sessionID, { immediate: true });
         if (memoryStore && state.targeted) {
           await captureMemory("captureEdit", {
             sessionID: input.sessionID,
@@ -611,6 +686,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
           stage: "tool.execute.after",
           tool: input.tool,
           sessionID: input.sessionID,
+          durationMs: elapsed(started),
           paths,
           editedFiles: editedFiles.length,
         });
@@ -636,7 +712,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
           lastVerification: command.slice(0, 300),
           lastVerificationOutput: failed ? text.slice(-1200) : undefined,
         });
-        await persist(input.sessionID);
+        await persist(input.sessionID, { immediate: true });
         if (memoryStore && state.targeted) {
           await captureMemory("captureVerification", {
             sessionID: input.sessionID,
@@ -649,6 +725,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
           stage: "tool.execute.after",
           tool: input.tool,
           sessionID: input.sessionID,
+          durationMs: elapsed(started),
           verification: failed ? "failed" : "passed",
           command: command.slice(0, 160),
         });
@@ -701,6 +778,7 @@ export default async function strataReasoning(pluginInput, rawOptions = {}) {
       if (event?.type === "session.deleted") {
         const sessionID = event.properties?.sessionID;
         if (sessionID) {
+          cancelPersist(sessionID);
           sessions.delete(sessionID);
           if (stateStore) await stateStore.delete(sessionID);
         }

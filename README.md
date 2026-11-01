@@ -222,7 +222,7 @@ opencode.
 | `sessionStateMaxAgeDays` | `30` | Ignore persisted session state older than this. |
 | `respectExplicitEffort` | `true` | Do not override an existing `reasoning_effort` or `enable_thinking` in model options. |
 | `overrideTemperature` | `true` | Set the temperature values above. |
-| `debug` | `false` | Log each decision to stderr and `client.app.log` under `qwen-harness`. |
+| `debug` | `false` | Log each decision plus hook/state/memory timings to stderr and `client.app.log` under `qwen-harness`. |
 | `ultraKeywords` | see `lib.js` | Case-insensitive keyword list. |
 | `highKeywords` | see `lib.js` | Case-insensitive keyword list. |
 | `debugKeywords` | see `lib.js` | Case-insensitive keyword list. |
@@ -427,8 +427,10 @@ Session state is separate. With `persistentState: true`, verification pending,
 failed, stale, gate-required, edited files, and todo state are written to a
 per-session JSON file under `memoryDir`. If opencode restarts and reuses the
 session id, the next request hydrates that state, so an unchecked edit still
-blocks another edit and the verification reminder survives. Session state is
-deleted on `session.deleted`; project memory remains.
+blocks another edit and the verification reminder survives. Edit, todo, and
+verification updates save immediately; other state updates are coalesced to keep
+I/O off the per-turn critical path. Session state is deleted on `session.deleted`;
+project memory remains.
 
 Both features always strip `<private>...</private>` blocks. With the default
 `memoryRedactSecrets: true`, they also redact common API-key, bearer-token,

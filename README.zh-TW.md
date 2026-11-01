@@ -216,7 +216,7 @@ server 與 mock provider，需要外掛已在 active config 中；設定
 | `sessionStateMaxAgeDays` | `30` | 忽略超過此天數的持久化 session 狀態。 |
 | `respectExplicitEffort` | `true` | 不覆寫 model options 中已存在的 `reasoning_effort` 或 `enable_thinking`。 |
 | `overrideTemperature` | `true` | 套用上表中的 temperature。 |
-| `debug` | `false` | 將每次決策寫到 stderr 與 `client.app.log`，service 名稱為 `qwen-harness`。 |
+| `debug` | `false` | 將每次決策與 hook／state／memory 耗時寫到 stderr 與 `client.app.log`，service 名稱為 `qwen-harness`。 |
 | `ultraKeywords` | 見 `lib.js` | 不分大小寫的關鍵字清單。 |
 | `highKeywords` | 見 `lib.js` | 不分大小寫的關鍵字清單。 |
 | `debugKeywords` | 見 `lib.js` | 不分大小寫的關鍵字清單。 |
@@ -397,8 +397,9 @@ system。區塊標示為「Project memory」並明確提醒可能過時。這不
 Session 狀態是分開的。啟用 `persistentState: true` 後，verification pending、
 failed、stale、gate-required、修改檔案與 todo 狀態會寫入 `memoryDir` 下的
 per-session JSON。若 opencode 重啟並重用相同 session id，下一個請求會載入狀態，
-因此未檢查的修改仍會阻擋下一次修改，驗證提醒也會保留。`session.deleted` 會刪除
-session 狀態；專案記憶會保留。
+因此未檢查的修改仍會阻擋下一次修改，驗證提醒也會保留。修改、todo 與驗證事件會
+立即寫入；其他狀態更新會合併，避免 I/O 落在每回合關鍵路徑。`session.deleted`
+會刪除 session 狀態；專案記憶會保留。
 
 兩者都會在寫入前移除 `<private>...</private>`。預設
 `memoryRedactSecrets: true` 會再遮蔽常見 API key、Bearer token、password 與 secret
