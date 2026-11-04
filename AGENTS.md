@@ -15,7 +15,10 @@ needed, and blocks model-spawned subagents for this deployment.
 - Config: `disableSubagents: true`, `autoTodo: true`, `autoVerify: true`, and `verificationGate: true`
 - Subagents are disabled because local Qwen3.8 Flash Next subagents are weaker
   and much slower than doing the work directly.
-- Verification state is tracked per session and preserved through compaction.
+- Verification state is tracked per session, preserved through compaction, and
+  can be persisted across restarts.
+- Project memory is opt-in, local-only, dependency-free JSONL, and injected only
+  for targeted models.
 
 ## Non-negotiable behavior
 
@@ -46,6 +49,9 @@ needed, and blocks model-spawned subagents for this deployment.
   for Strata, `reasoning_effort` for Ollama/llama.cpp/vLLM, `none` for unknown
   or unreliable OpenAI-compatible endpoints.
 - Do not restore per-model subagent exceptions unless explicitly requested.
+- Keep memory and session-state writes opt-in, local-only, and free of full
+  prompts, full tool output, and assistant replies. Remove `<private>` blocks
+  always; redact common secrets by default via `memoryRedactSecrets`.
 - Keep the README options, implementation, and tests in sync.
 
 ## File writing
@@ -62,8 +68,11 @@ needed, and blocks model-spawned subagents for this deployment.
 - Plain ESM JavaScript; no build step and no runtime dependencies.
 - Follow the existing style: 2-space indentation, double quotes, semicolons.
 - Do not add comments unless they explain something non-obvious.
-- Preserve the config hook and these seven hooks: `chat.message`,
-  `experimental.chat.messages.transform`, `chat.params`,
+- `memory.js` owns project-scoped JSONL observations, ranking, privacy
+  sanitization, and injection formatting; `state.js` owns atomic per-session
+  state files. Neither may call a model or use the network.
+- Preserve the config hook, these seven hooks, and the `event` cleanup:
+  `chat.message`, `experimental.chat.messages.transform`, `chat.params`,
   `experimental.chat.system.transform`, `tool.execute.before`,
   `tool.execute.after`, and `experimental.session.compacting`.
 - `config` adds providers with local `baseURL`s; `chat.message` sets the
@@ -71,7 +80,8 @@ needed, and blocks model-spawned subagents for this deployment.
   for `task` in a marked session and for an unchecked edit when the gate is on;
   the system transform adds the no-subagent, planning, and verification
   instructions; `tool.execute.after` tracks todos, edited files, and checks;
-  the compaction hook preserves the harness state.
+  the compaction hook preserves the harness state; memory/state stores hydrate
+  and persist only targeted sessions.
 
 ## Tests
 
