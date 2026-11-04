@@ -334,7 +334,7 @@ const CODE_KEYWORDS = [
 ];
 
 const TOOL_FAILURE_RE =
-  /(?:^|\n)\s*(?:error|fatal|panic|traceback|exception)\b|command not found|permission denied|no such file|exit (?:code|status) [1-9]|tests? failed|assertion failed|segmentation fault|timed out|timeout after|\bFAILED\b/i;
+  /(?:^|\n)[ \t]*(?:error|fatal|panic|traceback|exception)\b|command not found|permission denied|no such file|exit (?:code|status) [1-9]|tests? failed|assertion failed|segmentation fault|timed out|timeout after|\bFAILED\b/i;
 
 function asString(value, fallback) {
   return typeof value === "string" ? value.trim() : fallback;

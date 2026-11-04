@@ -8,6 +8,7 @@
 - Strip `<private>` blocks and common secrets before storing memory or session text.
 - Add `memoryRedactSecrets` to disable secret-pattern redaction while keeping `<private>` filtering.
 - Coalesce non-critical state writes and add debug timing for hooks, state, and memory.
+- Harden tool-failure detection against polynomial ReDoS on newline-heavy output.
 - Add opt-in persistent session state so verification gating survives restarts.
 - Add memory and restart-persistence tests.
 

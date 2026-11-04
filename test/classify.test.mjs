@@ -10,6 +10,7 @@ import {
   isCodePath,
   isLocalEndpoint,
   isVerificationCommand,
+  looksLikeToolFailure,
   matchesTarget,
   resolveOptions,
   resolveProviderProfile,
@@ -259,6 +260,13 @@ test("sampling follows thinking and non-thinking model-card sets", async () => {
   assert.equal(simple.options.repetition_penalty, 1);
   assert.equal(simple.temperature, 0.7);
   assert.equal(simple.options.chat_template_kwargs.enable_thinking, false);
+});
+
+test("tool failure detection handles newline-heavy output", () => {
+  assert.equal(looksLikeToolFailure("error: boom"), true);
+  assert.equal(looksLikeToolFailure("\n  error: boom"), true);
+  assert.equal(looksLikeToolFailure("\r\n\tFAILED\r\n"), true);
+  assert.equal(looksLikeToolFailure("\n".repeat(20000)), false);
 });
 
 test("verification commands and edited paths are recognized", () => {
